@@ -8,6 +8,7 @@ mutable struct Mesh
     numElem::Int64
     controlPoints::Array{Float64, 2}
     weights::Array{Float64, 1}
+    knots :: Array{Float64,1}
 end
 
 function Mesh1D(ptLeft, ptRight, numElem, degP)
@@ -71,7 +72,7 @@ function genMesh(nurbs::NURBS)
     for i=1:numElem
         elemNode[i]=IEN[i,:]
     end
-    IGAmesh = Mesh(elemVertex, elemNode, degP, C, numBasis, numElem, cpts, wgts)
+    IGAmesh = Mesh(elemVertex, elemNode, degP, C, numBasis, numElem, cpts, wgts, knotU)
     return IGAmesh
 end
 """
@@ -83,7 +84,7 @@ function plotBasisParam(mesh::Mesh)
     graph=Plots.plot(title="B-Splines of degree $(mesh.degP[1])")
     numPtsElem = 11
     evalPts = LinRange(-1, 1, numPtsElem)
-    B, dB, ddB = bernsteinBasis(evalPts, degP[1])
+    B, dB, ddB = bernsteinBasis(evalPts, mesh.degP[1])
 
     for iBasis = 1:mesh.numBasis
         colorIndex = ((iBasis-1) % length(colorList))+1

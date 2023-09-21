@@ -1,10 +1,4 @@
-# script for solving a 1D liner Euler-Bernoulli beam with IG
-#
-# ∫EIu''''(x)dx = ∫f(x)dx
-#
-# subject to the boundary conditions
-# u(0) = 0, u'(0) = 0, u''(1) = 0, u'''(1) = 0
-#
+using Test
 using Splines
 
 function test_fixed_fixed_UDL(numElem=2, degP=3)
