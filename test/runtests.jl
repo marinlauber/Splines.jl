@@ -2,7 +2,7 @@ using Test
 using Splines
 
 function test_fixed_fixed_UDL(numElem=2, degP=3)
-    
+
     # Material properties and mesh
     ptLeft = 0.0
     ptRight = 1.0
@@ -12,26 +12,30 @@ function test_fixed_fixed_UDL(numElem=2, degP=3)
     t(x) = 0.0
     exact_sol(x) = f(x).*x.^2/(24EI).*(1 .- x).^2    # fixed - fixed
 
-    IGAmesh, gauss_rule = Mesh1D(ptLeft, ptRight, numElem, degP)
+    mesh, gauss_rule = Mesh1D(ptLeft, ptRight, numElem, degP)
 
     # boundary conditions
-    Dirichlet_right = Boundary1D("Dirichlet", ptRight, ptRight, 0.0)
-    Dirichlet_left = Boundary1D("Dirichlet", ptLeft, ptLeft, 0.0)
-    Neumann_left = Boundary1D("Neumann", ptLeft, ptLeft, 0.0)
-    Neumann_right= Boundary1D("Neumann", ptRight, ptRight, 0.0)
+    Dirichlet_BC = [
+        Boundary1D("Dirichlet", ptRight, 0.0; comp=1),
+        Boundary1D("Dirichlet", ptRight, 0.0; comp=2),
+        Boundary1D("Dirichlet", ptLeft, 0.0; comp=1),
+        Boundary1D("Dirichlet", ptLeft, 0.0; comp=2)
+    ]
+    Neumann_BC = [
+        Boundary1D("Neumann", ptLeft, 0.0; comp=2),
+        Boundary1D("Neumann", ptRight, 0.0; comp=2)
+    ]
 
     # make a problem
-    p = Problem1D(EI, EA, f, t, IGAmesh, gauss_rule,
-                 [Dirichlet_left,Dirichlet_right],
-                 [Neumann_left,Neumann_right])
+    p = Problem1D(EI, EA, f, t, mesh, gauss_rule, Dirichlet_BC, Neumann_BC)
 
     result = static_lsolve!(p, static_residuals!, static_jacobian!)
 
-    u0 = result[1:IGAmesh.numBasis]
-    w0 = result[IGAmesh.numBasis+1:2IGAmesh.numBasis]
+    u0 = result[1:mesh.numBasis]
+    w0 = result[mesh.numBasis+1:2mesh.numBasis]
     x = LinRange(ptLeft, ptRight, numElem+1)
-    u = x .+ getSol(IGAmesh, u0, 1)
-    w = getSol(IGAmesh, w0, 1)
+    u = x .+ getSol(mesh, u0, 1)
+    w = getSol(mesh, w0, 1)
     we = exact_sol(x)
     println("Error: ", norm(w .- we))
     Plots.plot(u, w, label="Sol")
@@ -50,25 +54,29 @@ function test_pinned_pinned_UDL(numElem=2, degP=3)
     t(x) = 0.0
     exact_sol(x) = f(x)/(24EI).*(x .- 2x.^3 .+ x.^4) # pinned - pinned
 
-    IGAmesh, gauss_rule = Mesh1D(ptLeft, ptRight, numElem, degP)
+    mesh, gauss_rule = Mesh1D(ptLeft, ptRight, numElem, degP)
 
     # boundary conditions
-    Dirichlet_right = Boundary1D("Dirichlet", ptRight, ptRight, 0.0)
-    Dirichlet_left = Boundary1D("Dirichlet", ptLeft, ptLeft, 0.0)
+    Dirichlet_BC = [
+        Boundary1D("Dirichlet", ptRight, 0.0; comp=1),
+        Boundary1D("Dirichlet", ptRight, 0.0; comp=2),
+        Boundary1D("Dirichlet", ptLeft, 0.0; comp=1),
+        Boundary1D("Dirichlet", ptLeft, 0.0; comp=2)
+    ]
+    Neumann_BC = []
 
     # make a problem
-    p = Problem1D(EI, EA, f, t, IGAmesh, gauss_rule,
-                [Dirichlet_left,Dirichlet_right], [])
+    p = Problem1D(EI, EA, f, t, mesh, gauss_rule, Dirichlet_BC, Neumann_BC)
 
     # solve the problem
     result = static_lsolve!(p, static_residuals!, static_jacobian!)
 
     # get the solution
-    u0 = result[1:IGAmesh.numBasis]
-    w0 = result[IGAmesh.numBasis+1:2IGAmesh.numBasis]
+    u0 = result[1:mesh.numBasis]
+    w0 = result[mesh.numBasis+1:2mesh.numBasis]
     x = LinRange(ptLeft, ptRight, numElem+1)
-    u = x .+ getSol(IGAmesh, u0, 1)
-    w = getSol(IGAmesh, w0, 1)
+    u = x .+ getSol(mesh, u0, 1)
+    w = getSol(mesh, w0, 1)
     we = exact_sol(x)
     println("Error: ", norm(w .- we))
     Plots.plot(u, w, label="Sol")
@@ -87,25 +95,80 @@ function test_fixed_free_UDL(numElem=2, degP=3)
     t(x) = 0.0
     exact_sol(x) = f(x).*x.^2/(24EI).*(6 .- 4x .+ x.^2) # fixed - free
 
-    IGAmesh, gauss_rule = Mesh1D(ptLeft, ptRight, numElem, degP)
+    mesh, gauss_rule = Mesh1D(ptLeft, ptRight, numElem, degP)
 
     # boundary conditions
-    Dirichlet_left = Boundary1D("Dirichlet", ptLeft, ptLeft, 0.0)
-    Neumann_left = Boundary1D("Neumann", ptLeft, ptLeft, 0.0)
+    Dirichlet_BC = [
+        Boundary1D("Dirichlet", ptLeft, 0.0; comp=1),
+        Boundary1D("Dirichlet", ptLeft, 0.0; comp=2)
+    ]
+    Neumann_BC = [Boundary1D("Neumann", ptLeft, 0.0; comp=2)]
 
     # make a problem
-    p = Problem1D(EI, EA, f, t, IGAmesh, gauss_rule,
-                    [Dirichlet_left], [Neumann_left])
+    p = Problem1D(EI, EA, f, t, mesh, gauss_rule, Dirichlet_BC, Neumann_BC)
 
     # solve the problem
     result = static_lsolve!(p, static_residuals!, static_jacobian!)
 
     # get the results
-    u0 = result[1:IGAmesh.numBasis]
-    w0 = result[IGAmesh.numBasis+1:2IGAmesh.numBasis]
+    u0 = result[1:mesh.numBasis]
+    w0 = result[mesh.numBasis+1:2mesh.numBasis]
     x = LinRange(ptLeft, ptRight, numElem+1)
-    u = x .+ getSol(IGAmesh, u0, 1)
-    w = getSol(IGAmesh, w0, 1)
+    u = x .+ getSol(mesh, u0, 1)
+    w = getSol(mesh, w0, 1)
+    we = exact_sol(x)
+    println("Error: ", norm(w .- we))
+    Plots.plot(u, w, label="Sol")
+    Plots.plot!(x, we, label="Exact")
+end
+
+
+function test_fixed_free_PL(numElem=2, degP=3)
+
+    # Material properties and mesh
+    ptLeft = 0.0
+    ptRight = 1.0
+    EI = 1.0
+    EA = 1.0
+    f(x) = 0.0
+    t(x) = 0.0
+    P = 1.0
+    exact_sol(x) = P.*x.^2/(6EI).*(3 .- x) # fixed - free (Ponts Load)
+
+    # mesh
+    mesh, gauss_rule = Mesh1D(ptLeft, ptRight, numElem, degP)
+
+    # boundary conditions: u(0)=w(0)=0.0, dw(0)/dx=0.0
+    Dirichlet_BC = [
+        Boundary1D("Dirichlet", ptLeft, 0.0; comp=1),
+        Boundary1D("Dirichlet", ptLeft, 0.0; comp=2)
+    ]
+    Neumann_BC = [
+        Boundary1D("Neumann", ptLeft, 0.0; comp=2)
+    ]
+
+    # make a problem
+    p = Problem1D(EI, EA, f, t, mesh, gauss_rule, Dirichlet_BC, Neumann_BC)
+
+    # unpack pre-allocated storage and the convergence flag
+    @unpack x, resid, jacob = p
+
+    # compute rhs and lhs
+    static_jacobian!(jacob, x, p)
+    static_residuals!(resid, x, p)
+
+    # solve static problem with point load
+    resid[2*mesh.numBasis] -= P
+
+    # solve the problem
+    result = x .- jacob\resid
+
+    # get the results
+    u0 = result[1:mesh.numBasis]
+    w0 = result[mesh.numBasis+1:2mesh.numBasis]
+    x = LinRange(ptLeft, ptRight, numElem+1)
+    u = x .+ getSol(mesh, u0, 1)
+    w = getSol(mesh, w0, 1)
     we = exact_sol(x)
     println("Error: ", norm(w .- we))
     Plots.plot(u, w, label="Sol")
@@ -114,6 +177,7 @@ end
 
 
 function test_fixed_free(numElem=2, degP=3)
+    
     # Material properties and mesh
     ptLeft = 0.0
     ptRight = 1.0
@@ -124,27 +188,28 @@ function test_fixed_free(numElem=2, degP=3)
     f(x) = 0.0
     t(x) = 0.0
 
-    IGAmesh, gauss_rule = Mesh1D(ptLeft, ptRight, numElem, degP)
+    mesh, gauss_rule = Mesh1D(ptLeft, ptRight, numElem, degP)
 
     # boundary conditions
-    Dirichlet_left = Boundary1D("Dirichlet", ptLeft, ptLeft, 0.0)
-    Neumann_left = Boundary1D("Neumann", ptLeft, ptLeft, 0.0)
+    Dirichlet_BC = [Boundary1D("Dirichlet", ptLeft, 0.0; comp=1),
+                    Boundary1D("Dirichlet", ptLeft, 0.0; comp=2)]
+    Neumann_BC = [Boundary1D("Neumann", ptLeft, 0.0; comp=2)]
 
     # make a problem
-    p = Problem1D(EI, EA, f, t, IGAmesh, gauss_rule,
-                    [Dirichlet_left], [Neumann_left])
+    p = Problem1D(EI, EA, f, t, mesh, gauss_rule, Dirichlet_BC, Neumann_BC)
 
     # unpack pre-allocated storage and the convergence flag
-    @unpack x, resid, jacob, EI, EA, f, t, mesh, gauss_rule, Dirichlet_BC, Neumann_BC = p
+    @unpack x, resid, jacob = p
 
     # warp the residual and the jacobian
     function f!(resid, x) 
-        static_residuals!(resid, x, f, t, mesh, EI, EA, Dirichlet_BC, Neumann_BC, gauss_rule)
+        # static_residuals!(resid, x, f, t, mesh, p.EI, p.EA, Dirichlet_BC, Neumann_BC, gauss_rule)
+        static_residuals!(resid, x, p)
         # need a custom solver as the resdiuals are different
-        resid[2*IGAmesh.numBasis] -= F
-        return resid
+        resid[2*mesh.numBasis] -= F
+        return nothing
     end
-    j!(jacob, x) = static_jacobian!(jacob, x, f, mesh, EI, EA, Dirichlet_BC, Neumann_BC, gauss_rule)
+    j!(jacob, x) = static_jacobian!(jacob, x, p)
 
     # prepare for solve
     df = NLsolve.OnceDifferentiable(f!, j!, x, resid, jacob)
@@ -164,13 +229,13 @@ function test_fixed_free(numElem=2, degP=3)
     jacob .= df.DF
 
     # get the results
-    u0 = result[1:IGAmesh.numBasis]
-    w0 = result[IGAmesh.numBasis+1:2IGAmesh.numBasis]
+    u0 = result[1:mesh.numBasis]
+    w0 = result[mesh.numBasis+1:2mesh.numBasis]
     x = LinRange(ptLeft, ptRight, numElem+1)
-    u = x .+ getSol(IGAmesh, u0, 1)
-    w = getSol(IGAmesh, w0, 1)
-    println("u_x = ",2getSol(IGAmesh, u0, 1)[end])
-    println("u_y = ",2w[end])
+    u = x .+ getSol(mesh, u0, 1)
+    w = getSol(mesh, w0, 1)
+    println("u_x = ",getSol(mesh, u0, 1)[end])
+    println("u_y = ",w[end])
     Plots.plot(u, w, aspect_ratio=:equal, label="Sol")
 end
 
@@ -178,6 +243,7 @@ end
 test_fixed_fixed_UDL(3, 4)
 test_pinned_pinned_UDL(3, 4)
 test_fixed_free_UDL(3, 4)
+test_fixed_free_PL(3, 3)
 
-# non-linear tests, needs validation
+# # non-linear tests, needs validation
 test_fixed_free(8, 4)

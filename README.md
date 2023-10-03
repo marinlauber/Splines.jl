@@ -1,6 +1,9 @@
 # Splines
 
-Isogeometric analysis of non-linear Euler-Bernoulli beams using NURBS.
+###  Isogeometric Analysis of non-linear Euler-Bernoulli Beams
+
+![](NURBS.svg)
+
 
 [![Build Status](https://github.com/marinlauber/Splines.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/marinlauber/Splines.jl/actions/workflows/CI.yml?query=branch%3Amain)
 

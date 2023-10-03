@@ -177,3 +177,93 @@ function plotSolError(mesh::Mesh, sol0, exactSol::Function)
     end
     display(graph)
 end
+function getDerivSol(mesh::Mesh, sol0)
+    numPtsElem = 4
+    evalPts = LinRange(-1, 1, numPtsElem)
+    B, dB, ddB = bernsteinBasis(evalPts, mesh.degP[1])
+    sol = zeros((numPtsElem-1)*mesh.numElem+1)
+    is=1; ie=numPtsElem
+    for iElem in 1:mesh.numElem
+        uMin = mesh.elemVertex[iElem, 1]
+        uMax = mesh.elemVertex[iElem, 2]
+        Jac_ref_par = (uMax-uMin)/2
+        curNodes = mesh.elemNode[iElem]
+        N_mat = B*(mesh.C[iElem])'
+        dN_mat = dB * mesh.C[iElem]'/Jac_ref_par
+        wgts = mesh.weights[curNodes]
+        solVal = zeros(numPtsElem)
+        for iPlotPt = 1:numPtsElem
+            RR = N_mat[iPlotPt,:].* wgts
+            dR = dN_mat[iPlotPt,:].* wgts
+            w_sum = sum(RR)
+            dw_xi = sum(dR)
+            dR = dR/w_sum - RR*dw_xi/w_sum^2
+            solVal[iPlotPt] += dR' * sol0[curNodes]
+        end
+        sol[is:ie] .= solVal
+        is += numPtsElem-1 ; ie += numPtsElem-1
+    end
+    return sol
+end
+
+function getSol(mesh::Mesh, sol0, numPts=mesh.numElem)
+    numPtsElem = max(floor(Int, numPts/mesh.numElem)+1,2)
+    evalPts = LinRange(-1, 1, numPtsElem)
+    B, dB, ddB = bernsteinBasis(evalPts, mesh.degP[1])
+    sol = zeros((numPtsElem-1)*mesh.numElem+1)
+    is=1; ie=numPtsElem
+    for iElem in 1:mesh.numElem
+        curNodes = mesh.elemNode[iElem]
+        splineVal = B*(mesh.C[iElem])'
+        wgts = mesh.weights[curNodes]
+        basisVal = zero(splineVal)
+        for iPlotPt = 1:numPtsElem
+            RR = splineVal[iPlotPt,:].* wgts
+            w_sum = sum(RR)
+            RR /= w_sum
+            basisVal[iPlotPt,:] = RR
+        end
+        solVal = basisVal*sol0[curNodes]
+        sol[is:ie] .= solVal
+        is += numPtsElem-1 ; ie += numPtsElem-1
+    end
+    return sol
+end
+function getBasis(mesh::Mesh)
+    numPtsElem = 11
+    evalPts = LinRange(-1, 1, numPtsElem)
+    B, dB, ddB = bernsteinBasis(evalPts, mesh.degP[1])
+    R = zeros((numPtsElem-1)*mesh.numElem+1, mesh.numBasis)
+    dR = zeros((numPtsElem-1)*mesh.numElem+1, mesh.numBasis)
+    for iBasis = 1:mesh.numBasis
+        for iElem = 1:mesh.numElem
+            localIndex = findall(isequal(iBasis), mesh.elemNode[iElem])
+            if length(localIndex)>0
+                plotVal = B*(mesh.C[iElem][localIndex,:])'
+                R[(iElem-1)*(numPtsElem-1)+1:iElem*(numPtsElem-1)+1, iBasis] .= plotVal
+                plotVal = dB*(mesh.C[iElem][localIndex,:])'
+                dR[(iElem-1)*(numPtsElem-1)+1:iElem*(numPtsElem-1)+1, iBasis] .= plotVal
+            end
+        end
+    end
+    return R,dR
+end
+
+function getBasis(mesh::Mesh, x::Float64)
+    iElem = argmin(abs.(sum(mesh.elemVertex.-x, dims=2))[:])
+    points = mesh.elemVertex[iElem,:]
+    evalPts = [(x-points[1])/(points[2]-points[1])*2-1]
+    B, dB, ddB = bernsteinBasis(evalPts, mesh.degP[1])
+    R = zeros(mesh.numBasis)
+    dR = zeros(mesh.numBasis)
+    for iBasis = 1:mesh.numBasis
+        localIndex = findall(isequal(iBasis), mesh.elemNode[iElem])
+        if length(localIndex)>0
+            plotVal = B*mesh.C[iElem][localIndex,:]'
+            R[iBasis] = plotVal[1]
+            plotVal = dB*mesh.C[iElem][localIndex,:]'
+            dR[iBasis] = plotVal[1]
+        end
+    end
+    return R,dR
+end
