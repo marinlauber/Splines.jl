@@ -1,7 +1,10 @@
 using SparseArrays
 using UnPack
 
-struct EulerBeam
+# Abstract ODE peraotr
+abstract type ODEOperator end
+
+struct EulerBeam <: ODEOperator
     x :: Vector{Float64}
     resid :: Vector{Float64}
     jacob :: Matrix{Float64}

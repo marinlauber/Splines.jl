@@ -2,6 +2,16 @@ using NLsolve
 using ImplicitAD
 using LineSearches
 
+# Abstract type for the solver
+abstract type ODESolver end
+"""
+Generalized-α ODE solver
+"""
+struct GeneralizedAlpha <: ODESolver
+    nls::NonlinearSolver
+    dt::Float64
+    ρ∞::Float64
+end
 
 function static_nlsolve!(p, residual!, jacobian!)
 
