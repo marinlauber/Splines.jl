@@ -42,20 +42,16 @@ static_lsolve!(p) = static_lsolve!(p, static_residuals!, static_jacobian!)
 function static_lsolve!(p, residual!, jacobian!)
 
     # unpack pre-allocated storage and the convergence flag
-    # @unpack x, resid, jacob, EI, EA, f, t, mesh, gauss_rule, Dirichlet_BC, Neumann_BC = p
     @unpack x, resid, jacob = p
 
     # initial consition
     x0 = zeros(length(x))
 
     # update residual and the jacobian
-    # residual!(resid, x0, f, t, mesh, EI, EA, Dirichlet_BC, Neumann_BC, gauss_rule)
-    # jacobian!(jacob, x0, f, mesh, EI, EA, Dirichlet_BC, Neumann_BC, gauss_rule)
     residual!(resid, x0, p)
     jacobian!(jacob, x0, p)
     
-
-    # update the state
+    # update the state "Newton's method"
     x .= x0 .- ImplicitAD.implicit_linear(jacob, resid)
 
     return x

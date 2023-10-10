@@ -153,4 +153,8 @@ for k = 2:Nₜ
     push!(aNum, aⁿ);
 end
 uNum = hcat(uNum...);
+vNum = hcat(vNum...);
+aNum = hcat(aNum...);
 Plots.plot(t./T, uNum[1,:], color=:black)
+Plots.plot!(t./T, vNum[1,:])
+Plots.plot!(t./T, aNum[1,:], ylims=(-2,2))

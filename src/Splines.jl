@@ -19,7 +19,8 @@ include("Quadrature.jl")
 # export GaussQuad,genGaussLegendre
 
 include("EulerBeam.jl")
-export @unpack,Problem1D,static_residuals!,static_jacobian!,dynamic_residuals!,dynamic_jacobian!
+export @unpack,EulerBeam,static_residuals!,static_jacobian!,dynamic_residuals!,dynamic_jacobian!
+export global_mass!,dynamic_update!
 
 include("Solver.jl")
 export NLsolve,LineSearches,ImplicitAD,static_lsolve!,static_nlsolve!

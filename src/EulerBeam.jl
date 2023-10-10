@@ -1,40 +1,93 @@
 using SparseArrays
 using UnPack
 
-struct Problem1D
+struct EulerBeam
     x :: Vector{Float64}
     resid :: Vector{Float64}
     jacob :: Matrix{Float64}
     EI    :: Float64
     EA :: Float64
     f :: Function
-    t :: Function
     mesh :: Mesh
     gauss_rule :: GaussQuad
     Dirichlet_BC :: Vector{Boundary1D}
     Neumann_BC :: Vector{Boundary1D}
-    function Problem1D(EI, EA, f, t, mesh, gauss_rule, Dirichlet_BC=[], Neumann_BC=[])
+    function EulerBeam(EI, EA, f, mesh, gauss_rule, Dirichlet_BC=[], Neumann_BC=[])
         numNeuBC = length(Neumann_BC)
         # generate
         x = zeros(Float64, 2*mesh.numBasis+numNeuBC)
         resid = zeros(Float64, 2*mesh.numBasis+numNeuBC)
         jacob = spzeros(2*mesh.numBasis+numNeuBC, 2*mesh.numBasis+numNeuBC)
         rhs = zeros(Float64, 2*mesh.numBasis+numNeuBC)
-        new(x, resid, jacob, EI, EA, f, t, mesh, gauss_rule, Dirichlet_BC, Neumann_BC)
+        new(x, resid, jacob, EI, EA, f, mesh, gauss_rule, Dirichlet_BC, Neumann_BC)
     end
 end 
 
+function dynamic_update!(resid, jac, mass, xᵏ, aᵏ, problem, α₁, α₂, β, Δt)
+    # allocate stuff
+    @unpack jacob = problem
+    stiff = spzeros(size(jacob))
+    rhs = spzeros(size(resid))
 
-function dynamic_residuals!(resid, x₀, a₀ , M, problem)
-    static_residuals!(resid, x₀, problem)
-    resid .+= M*a₀
+    # update stiffness and jacobian
+    update_global!(stiff, jacob, xᵏ, problem.mesh, problem.gauss_rule, problem)
+
+    # update rhs vector
+    update_external!(rhs, problem.mesh, problem.f, problem.gauss_rule)
+
+    # apply boundary consitions
+    jac .= α₁/(β*Δt^2)*mass + α₂*jacob
+    applyBCGlobal!(jac, stiff, rhs, problem.mesh,
+                   problem.Dirichlet_BC, problem.Neumann_BC,
+                   problem.gauss_rule)
+
+    # compute resdiuals
+    resid .= mass*aᵏ + stiff*xᵏ - rhs
+    return nothing
+end
+
+function dynamic_residuals!(resid, x₀, a₀ , mass, problem)
+
+    # allocate stuff
+    @unpack jacob = problem
+    stiff = spzeros(size(jacob))
+    rhs = spzeros(size(resid))
+
+    # update stiffness and jacobian
+    update_global!(stiff, jacob, x₀, problem.mesh, problem.gauss_rule, problem)
+
+    # update rhs vector
+    update_external!(rhs, problem.mesh, problem.f, problem.gauss_rule)
+
+    # apply boundary consitions
+    applyBCGlobal!(stiff, jacob, rhs, problem.mesh,
+                   problem.Dirichlet_BC, problem.Neumann_BC,
+                   problem.gauss_rule)
+
+    # compute resdiuals
+    resid .= mass*a₀ + stiff*x₀ - rhs
     return nothing
 end
 
 
-function dynamic_jacobian!(jacob, x₀, α₁, α₂, β, Δt, M, problem)
-    static_jacobian!(jacob, x₀, problem)
-    jacob .= α₁/(β*Δt^2)*M +  α₂*jacob
+function dynamic_jacobian!(jac, x₀, α₁, α₂, β, Δt, mass, problem)
+     
+    # allocate stuff
+     @unpack jacob = problem
+     stiff = spzeros(size(jacob))
+     resid = spzeros(size(x₀))
+ 
+     # extract component
+     update_global!(stiff, jacob, x₀, problem.mesh, problem.gauss_rule, problem)
+ 
+     # apply boundary consitions
+     jacob .= α₁/(β*Δt^2)*mass + α₂*jacob
+     applyBCGlobal!(stiff, jacob, resid, problem.mesh,
+                    problem.Dirichlet_BC, problem.Neumann_BC,
+                    problem.gauss_rule)
+ 
+     # avoid nul effect of function as jacob is defined with the function           
+    jac .= jacob #α₁/(β*Δt^2)*M +  α₂*jacob
     return nothing
 end
 
@@ -50,7 +103,7 @@ function static_residuals!(resid, x₀, problem)
     update_global!(stiff, jacob, x₀, problem.mesh, problem.gauss_rule, problem)
 
     # update rhs vector
-    update_external!(rhs, problem.mesh, problem.t, problem.f, problem.gauss_rule)
+    update_external!(rhs, problem.mesh, problem.f, problem.gauss_rule)
 
     # apply boundary consitions
     applyBCGlobal!(stiff, jacob, rhs, problem.mesh,
@@ -146,8 +199,10 @@ function applyBCGlobal!(global_stiff, global_jacob, global_resid, mesh, Dirichle
             bcval = vcat(bcval, Dirichlet_BC[i].op_val)
             global_resid .-= global_stiff[:,bcdof]*bcval
             global_resid[bcdof] .= bcval
-            global_stiff[bcdof, :] .= 0.0; global_jacob[bcdof,:] .= 0.0
-            global_stiff[:, bcdof] .= 0.0; global_jacob[:,bcdof] .= 0.0
+            global_stiff[bcdof, :] .= 0.0 
+            global_stiff[:, bcdof] .= 0.0 
+            global_jacob[bcdof,:] .= 0.0
+            global_jacob[:,bcdof] .= 0.0
             global_stiff[bcdof, bcdof] = sparse(I, length(bcdof), length(bcdof))
             global_jacob[bcdof, bcdof] = sparse(I, length(bcdof), length(bcdof))
         end
@@ -155,12 +210,74 @@ function applyBCGlobal!(global_stiff, global_jacob, global_resid, mesh, Dirichle
     return nothing
 end
 
+function applyBCNewton!(jacob, resid, mesh, Dirichlet_BC, Neumann_BC, gauss_rule)
+    # apply Neumann BC
+    for i=eachindex(Neumann_BC)
+        off = (Neumann_BC[i].comp-1)*mesh.numBasis
+        bcdof = findall(mesh.controlPoints[1,:].==Neumann_BC[i].x_val)
+        for iElem=1:mesh.numElem
+            curNodes = mesh.elemNode[iElem]
+            if bcdof[1] in curNodes
+                # nodes = gauss_rule.nodes
+                nodes = [2*Neumann_BC[i].u_val-1] # map into parameter space
+                # compute the Bernstein basis functions and derivatives
+                B, dB, ddB = bernsteinBasis(nodes, mesh.degP[1])
+                uMin = mesh.elemVertex[iElem, 1]
+                uMax = mesh.elemVertex[iElem, 2]
+                Jac_ref_par = (uMax-uMin)/2
+
+                #compute the (B-)spline basis functions and derivatives with Bezier extraction
+                N_mat = B * mesh.C[iElem]'
+                dN_mat = dB * mesh.C[iElem]'/Jac_ref_par
+
+                #compute the rational spline basis
+                numNodes = length(curNodes)
+                cpts = mesh.controlPoints[1, curNodes]
+                wgts = mesh.weights[curNodes]
+                localLagrange = zeros(numNodes)
+                for iGauss = 1:length(nodes)
+                    #compute the rational basis
+                    RR = N_mat[iGauss,:].* wgts
+                    dR = dN_mat[iGauss,:].* wgts
+                    w_sum = sum(RR)
+                    dw_xi = sum(dR)
+                    dR = dR/w_sum - RR*dw_xi/w_sum^2
+
+                    #compute the Jacobian of the transformation from parameter to physical space
+                    dxdxi = dR' * cpts
+                    Jac_par_phys = det(dxdxi)
+                    localLagrange += Jac_ref_par * Jac_par_phys * dR * gauss_rule.weights[iGauss]
+                end
+                jacob[2mesh.numBasis+i,curNodes.+off] .= localLagrange
+                jacob[curNodes.+off,2mesh.numBasis+i] .= localLagrange
+                # lagrange multiplier entry
+                resid[2mesh.numBasis+i] = Neumann_BC[i].op_val
+            end
+        end
+    end
+    
+    # apply Dirichlet BC
+    for i=eachindex(Dirichlet_BC)
+        bcdof = Array{Int64,1}(undef, 0)
+        bcdof = vcat(bcdof, findall(mesh.controlPoints[1,:].==Dirichlet_BC[i].x_val))
+        bcdof .+= (Dirichlet_BC[i].comp-1)*mesh.numBasis
+        bcval = Array{Float64,1}(undef, 0)
+        bcval = vcat(bcval, Dirichlet_BC[i].op_val)
+        resid .-= jacob[:,bcdof]*bcval
+        resid[bcdof] .= bcval
+        jacob[bcdof, :] .= 0.0
+        jacob[:, bcdof] .= 0.0
+        jacob[bcdof, bcdof] = sparse(I, length(bcdof), length(bcdof))
+    end
+    return nothing
+end
 
 function update_global!(global_stiff, global_jacob, x0, mesh, gauss_rule, problem)
-    global_stiff .= 0.; global_jacob .= 0.
+    off = mesh.numBasis
+    global_stiff[1:2off,1:2off] .= 0.;
+    global_jacob[1:2off,1:2off] .= 0.;
     B, dB, ddB = bernsteinBasis(gauss_rule.nodes, mesh.degP[1])
     domainLength = 0
-    off = mesh.numBasis
     for iElem = 1:mesh.numElem
         uMin = mesh.elemVertex[iElem, 1]
         uMax = mesh.elemVertex[iElem, 2]
@@ -220,7 +337,7 @@ end
 Assembles the RHS vector corresponding to the body force
 RHS[i]=∫_Ω ϕ_i(x)*f(x) dΩ
 """
-function update_external!(rhs, mesh::Mesh, fx::Function,  fy::Function, gauss_rule)
+function update_external!(rhs, mesh::Mesh, fx::Function, gauss_rule)
     B, dB, ddB = bernsteinBasis(gauss_rule.nodes, mesh.degP[1])
     domainLength = 0; rhs .= 0.0
     for iElem = 1:mesh.numElem
@@ -252,9 +369,11 @@ function update_external!(rhs, mesh::Mesh, fx::Function,  fy::Function, gauss_ru
             Jac_par_phys = det(dxdxi)
             RR /= w_sum
 
+            # external force at physical point
             phys_pt = RR'*cpts
-            localx += Jac_par_phys * Jac_ref_par * fx(phys_pt) * RR * gauss_rule.weights[iGauss]
-            localy += Jac_par_phys * Jac_ref_par * fy(phys_pt) * RR * gauss_rule.weights[iGauss]
+            fi = fx(phys_pt)
+            localx += Jac_par_phys * Jac_ref_par * fi[1] * RR * gauss_rule.weights[iGauss]
+            localy += Jac_par_phys * Jac_ref_par * fi[2] * RR * gauss_rule.weights[iGauss]
             domainLength += Jac_par_phys * Jac_ref_par * gauss_rule.weights[iGauss]
         end
         rhs[curNodes] += localx
@@ -262,6 +381,52 @@ function update_external!(rhs, mesh::Mesh, fx::Function,  fy::Function, gauss_ru
     end
     # @show domainLength
     return nothing
+end
+
+ 
+function global_mass!(mass, mesh::Mesh, ρ, gauss_rule)
+    B, dB = bernsteinBasis(gauss_rule.nodes, mesh.degP[1])
+    domainLength = 0
+    # mass = spzeros(Float64, mesh.numBasis, mesh.numBasis)
+    for iElem = 1:mesh.numElem
+        uMin = mesh.elemVertex[iElem, 1]
+        uMax = mesh.elemVertex[iElem, 2]
+        Jac_ref_par = (uMax-uMin)/2
+
+        #compute the (B-)spline basis functions and derivatives with Bezier extraction
+        N_mat = B * mesh.C[iElem]'
+        dN_mat = dB * mesh.C[iElem]'/Jac_ref_par
+
+        #compute the rational spline basis
+        curNodes = mesh.elemNode[iElem]
+        numNodes = length(curNodes)
+        cpts = mesh.controlPoints[1, curNodes]
+        wgts = mesh.weights[curNodes]
+        localMass = zeros(numNodes, numNodes)
+        for iGauss = 1:length(gauss_rule.nodes)
+            #compute the rational basis
+            RR = N_mat[iGauss,:].* wgts
+            dR = dN_mat[iGauss,:].* wgts
+            w_sum = sum(RR)
+            dw_xi = sum(dR)
+            dR = dR/w_sum - RR*dw_xi/w_sum^2
+
+            #compute the Jacobian of the transformation from parameter to physical space
+            dxdxi = dR' * cpts
+            Jac_par_phys = det(dxdxi)
+
+            RR /= w_sum
+            phys_pt = RR' * cpts
+            localMass += Jac_par_phys * Jac_ref_par * ρ(phys_pt) * (RR*RR') * gauss_rule.weights[iGauss]
+            domainLength += Jac_par_phys * Jac_ref_par * gauss_rule.weights[iGauss]
+        end
+        #@show localMass
+        #readline(stdin)
+        mass[curNodes, curNodes] += localMass
+        mass[curNodes.+mesh.numBasis, curNodes.+mesh.numBasis] += localMass
+    end
+    # @show domainLength
+    return mass
 end
 
 
@@ -346,52 +511,7 @@ end
 #     return K11,K12,K22,J22
 # end
 
-# """
-# Aseembles the mass matrix M_ij = ∫ a1(x)ϕ_i(x)ϕ_j(x) dΩ
-# """
-# function assemble_mass(mesh::Mesh, m, gauss_rule)
-#     B, dB = bernsteinBasis(gauss_rule.nodes, mesh.degP[1])
-#     domainLength = 0
-#     mass = spzeros(Float64, mesh.numBasis, mesh.numBasis)
-#     for iElem = 1:mesh.numElem
-#         uMin = mesh.elemVertex[iElem, 1]
-#         uMax = mesh.elemVertex[iElem, 2]
-#         Jac_ref_par = (uMax-uMin)/2
 
-#         #compute the (B-)spline basis functions and derivatives with Bezier extraction
-#         N_mat = B * mesh.C[iElem]'
-#         dN_mat = dB * mesh.C[iElem]'/Jac_ref_par
-
-#         #compute the rational spline basis
-#         curNodes = mesh.elemNode[iElem]
-#         numNodes = length(curNodes)
-#         cpts = mesh.controlPoints[1, curNodes]
-#         wgts = mesh.weights[curNodes]
-#         localMass = zeros(numNodes, numNodes)
-#         for iGauss = 1:length(gauss_rule.nodes)
-#             #compute the rational basis
-#             RR = N_mat[iGauss,:].* wgts
-#             dR = dN_mat[iGauss,:].* wgts
-#             w_sum = sum(RR)
-#             dw_xi = sum(dR)
-#             dR = dR/w_sum - RR*dw_xi/w_sum^2
-
-#             #compute the Jacobian of the transformation from parameter to physical space
-#             dxdxi = dR' * cpts
-#             Jac_par_phys = det(dxdxi)
-
-#             RR /= w_sum
-#             localMass += m * (RR*RR') * Jac_par_phys * Jac_ref_par * gauss_rule.weights[iGauss]
-#             domainLength += Jac_par_phys * Jac_ref_par * gauss_rule.weights[iGauss]
-
-#         end
-#         #@show localMass
-#         #readline(stdin)
-#         mass[curNodes, curNodes] += localMass
-#     end
-#     # @show domainLength
-#     return mass
-# end
 
 # """
 # Assembles the RHS vector corresponding to the body force
