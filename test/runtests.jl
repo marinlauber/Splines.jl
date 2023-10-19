@@ -1,6 +1,10 @@
 using Test
 using Splines
 
+@testset "bernstein.jl" begin
+    @test bernsteinBasis(1, 4) ≈ [[0.,0.,0.,1],[],[]]
+end
+
 function test_fixed_fixed_UDL(numElem=2, degP=3)
 
     # Material properties and mesh
