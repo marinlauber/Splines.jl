@@ -25,6 +25,9 @@ export global_mass!,dynamic_update!
 include("Solver.jl")
 export NLsolve,LineSearches,ImplicitAD,static_lsolve!,static_nlsolve!
 
+include("Operator.jl")
+export FEOperator,AbstractFEOperator,integrate!,applyBC!
+
 """
     make a sparse copy of a mtrix
 """

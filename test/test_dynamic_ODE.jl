@@ -37,7 +37,9 @@ Neumann_BC = [
 ]
 
 # make a problem
-p = EulerBeam(EI, EA, f, mesh, gauss_rule, Dirichlet_BC, Neumann_BC)
+# p = EulerBeam(EI, EA, f, mesh, gauss_rule, Dirichlet_BC, Neumann_BC)
+op = FEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC, Neumann_BC)
+
 
 ## Time integration
 ρ∞ = 0.5; # spectral radius of the amplification matrix at infinitely large time step
@@ -54,10 +56,10 @@ time = collect(0.0:Δt:T);
 Nₜ = length(time);
 
 # unpack variables
-@unpack x, resid, jacob = p
+@unpack resid, jacob = op
 M = spzero(jacob)
-stiff = zeros(size(jacob))
-fext = zeros(size(resid))
+# stiff = zeros(size(jacob))
+fext = zeros((2,length(resid)))
 M = global_mass!(M, mesh, density, gauss_rule)
 
 # initialise
@@ -70,9 +72,9 @@ aⁿ = zero(a0);
 xs = LinRange(ptLeft, ptRight, numElem+1)
 
 # time loop
-@gif for k = 2:Nₜ
+@gif for k = 2:2
 
-    global dⁿ, vⁿ, aⁿ, F;
+    global dⁿ, vⁿ, aⁿ, P;
     global vⁿ⁺¹, aⁿ⁺¹, dⁿ⁺¹, dⁿ⁺ᵅ, vⁿ⁺ᵅ, aⁿ⁺ᵅ;
 
     tⁿ⁺¹ = time[k]; # current time instal
@@ -84,7 +86,7 @@ xs = LinRange(ptLeft, ptRight, numElem+1)
     dⁿ⁺¹ = dⁿ; r₂ = 1.0; iter = 1;
 
     # Newton-Raphson iterations loop
-    while r₂ > 1.0e-6 && iter < 100
+    while r₂ > 1.0e-6 && iter < 1
         # compute v_{n+1}, a_{n+1}, ... from "Isogeometric analysis: toward integration of CAD and FEA"
         vⁿ⁺¹ = γ/(β*Δt)*dⁿ⁺¹ - γ/(β*Δt)*dⁿ + (1.0-γ/β)*vⁿ - Δt*(γ/2β-1.0)*aⁿ;
         aⁿ⁺¹ = 1.0/(β*Δt^2)*dⁿ⁺¹ - 1.0/(β*Δt^2)*dⁿ - 1.0/(β*Δt)*vⁿ - (1.0/2β-1.0)*aⁿ;
@@ -101,24 +103,22 @@ xs = LinRange(ptLeft, ptRight, numElem+1)
         # Splines.update_external!(fext, p.mesh, p.f, p.gauss_rule)
         # fext[2mesh.numBasis] += P*sin(2π*fhz[1]*tⁿ⁺ᵅ);
 
-        integrate!(stiff, jacob, dⁿ⁺ᵅ, fext, p)
-        fext[2mesh.numBasis] += P*sin(2π*fhz[1]*tⁿ⁺ᵅ);
+        integrate!(op, dⁿ⁺ᵅ, fext)
+        op.ext[2op.mesh.numBasis] += P*sin(2π*fhz[1]*tⁿ⁺ᵅ);
 
-        residuals!(resid, )
+        # residuals!(resid, )
 
         # # apply BCs
-        jacob .= αm/(β*Δt^2)*M + αf*jacob
-        resid .= stiff*dⁿ⁺ᵅ + M*aⁿ⁺ᵅ - fext
-        Splines.applyBCGlobal!(stiff, jacob, resid, p.mesh, 
-                               p.Dirichlet_BC, p.Neumann_BC,
-                               p.gauss_rule)
+        op.jacob .= αm/(β*Δt^2)*M + αf*op.jacob
+        op.resid .= op.stiff*dⁿ⁺ᵅ + M*aⁿ⁺ᵅ - op.ext
+        applyBC!(op)
 
         # check convergence
-        r₂ = norm(resid);
+        r₂ = norm(op.resid);
         if r₂ < 1.0e-6 && break; end
 
         # newton solve for the displacement increment
-        dⁿ⁺¹ -= jacob\resid; iter += 1
+        dⁿ⁺¹ -= op.jacob\op.resid; iter += 1
     end
 
     println(" rNorm : $iter ...  $r₂")

@@ -12,14 +12,19 @@ struct FEOperator <: AbstractFEOperator
     ext   :: Vector{Float64}
     mesh :: Mesh
     gauss_rule :: GaussQuad
-    BC :: Vector{Boundary1D}
+    Dirichlet_BC :: Vector{Boundary1D}
+    Neumann_BC :: Vector{Boundary1D}
     EI :: Float64
     EA :: Float64
-    function FEOperator(mesh::Mesh, gauss_rule::GaussQuad, BC::Vector{Boundary1D})
-        numNodes = mesh.numNodes
-        numBasis = mesh.numBasis
-        new(zeros(2*numBasis), zeros(2*numBasis), zeros(2*numBasis, 2*numBasis), 
-            zeros(2*numBasis, 2*numBasis), zeros(2*numBasis), mesh, gauss_rule, BC)
+    function FEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC=[], Neumann_BC=[], )
+        numNeuBC = length(Neumann_BC)
+        # generate
+        x = zeros(Float64, 2*mesh.numBasis+numNeuBC)
+        resid = zeros(Float64, 2*mesh.numBasis+numNeuBC)
+        ext = zeros(Float64, 2*mesh.numBasis+numNeuBC)
+        stiff = spzeros(2*mesh.numBasis+numNeuBC, 2*mesh.numBasis+numNeuBC)
+        jacob = spzeros(2*mesh.numBasis+numNeuBC, 2*mesh.numBasis+numNeuBC)
+        new(x, resid, stiff, jacob, ext, mesh, gauss_rule, Dirichlet_BC, Neumann_BC, EI, EA)
     end
 end
 
@@ -31,7 +36,7 @@ function integrate!(op::FEOperator, x0::Vector{Float64}, fx)
 
     B, dB, ddB = bernsteinBasis(op.gauss_rule.nodes, op.mesh.degP[1])
     domainLength = 0
-    for iElem = 1:mesh.numElem
+    for iElem = 1:op.mesh.numElem
         uMin = op.mesh.elemVertex[iElem, 1]
         uMax = op.mesh.elemVertex[iElem, 2]
         Jac_ref_par = (uMax-uMin)/2
@@ -47,6 +52,7 @@ function integrate!(op::FEOperator, x0::Vector{Float64}, fx)
         wgts = op.mesh.weights[curNodes]
 
         # local external force
+        numNodes = length(curNodes)
         localx = zeros(numNodes)
         localy = zeros(numNodes)
 
@@ -86,7 +92,7 @@ function integrate!(op::FEOperator, x0::Vector{Float64}, fx)
             domainLength += Jac_ref_par * Jac_par_phys * op.gauss_rule.weights[iGauss]
         end
         op.ext[curNodes] += localx
-        op.ext[curNodes.+mesh.numBasis] += localy
+        op.ext[curNodes.+op.mesh.numBasis] += localy
     end
     # enforce symmetry K21 -> K12
     op.stiff[off+1:2off,1:off] .= op.stiff[1:off,off+1:2off]
@@ -99,19 +105,16 @@ end
 
 
 function applyBC!(op::FEOperator)
-    Neumann_BC = [op.BC[i] for i=eachindex(op.BC) if op.BC[i].type=="Neumann"]
-    Dirichlet_BC = [op.BC[i] for i=eachindex(op.BC) if op.BC[i].type=="Dirichlet"]
     # apply Neumann BC
-    Bmat = spzeros(Float64, length(Neumann_BC), size(op.stiff, 2))
-    # rhs = spzeros(Float64, size(op.stiff,1)+length(Neumann_BC))
-    for i=eachindex(Neumann_BC)
-        off = (Neumann_BC[i].comp-1)*op.mesh.numBasis
-        cdof_neu = findall(op.mesh.controlPoints[1,:].==Neumann_BC[i].x_val)
+    Bmat = spzeros(Float64, length(op.Neumann_BC), size(op.stiff, 2))
+    for i=eachindex(op.Neumann_BC)
+        off = (op.Neumann_BC[i].comp-1)*op.mesh.numBasis
+        cdof_neu = findall(op.mesh.controlPoints[1,:].==op.Neumann_BC[i].x_val)
         for iElem=1:op.mesh.numElem
             curNodes = op.mesh.elemNode[iElem]
             if cdof_neu[1] in curNodes
                 # nodes = gauss_rule.nodes
-                nodes = [2*Neumann_BC[i].u_val-1] # map into parameter space
+                nodes = [2*op.Neumann_BC[i].u_val-1] # map into parameter space
                 # compute the Bernstein basis functions and derivatives
                 B, dB, ddB = bernsteinBasis(nodes, op.mesh.degP[1])
                 uMin = op.mesh.elemVertex[iElem, 1]
@@ -143,7 +146,7 @@ function applyBC!(op::FEOperator)
                 end
                 Bmat[i,curNodes.+off] += localLagrange
                 # lagrange multiplier entry
-                global_resid[2mesh.numBasis+i] = Neumann_BC[i].op_val
+                op.resid[2op.mesh.numBasis+i] = op.Neumann_BC[i].op_val
             end
         end
     end
@@ -152,21 +155,21 @@ function applyBC!(op::FEOperator)
     op.jacob[end-size(Bmat,1)+1:end,1:size(Bmat,2)] .= Bmat
     op.jacob[1:size(Bmat,2),end-size(Bmat,1)+1:end] .= Bmat'
     # apply Dirichlet BC
-    for i=eachindex(Dirichlet_BC)
+    for i=eachindex(op.Dirichlet_BC)
         bcdof = Array{Int64,1}(undef, 0)
-        bcdof = vcat(bcdof, findall(op.mesh.controlPoints[1,:].==Dirichlet_BC[i].x_val))
-        for j ∈ Dirichlet_BC[i].comp
+        bcdof = vcat(bcdof, findall(op.mesh.controlPoints[1,:].==op.Dirichlet_BC[i].x_val))
+        for j ∈ op.Dirichlet_BC[i].comp
             bcdof .+= (j-1)*op.mesh.numBasis
             bcval = Array{Float64,1}(undef, 0)
-            bcval = vcat(bcval, Dirichlet_BC[i].op_val)
-            global_resid .-= op.stiff[:,bcdof]*bcval
-            global_resid[bcdof] .= bcval
+            bcval = vcat(bcval, op.Dirichlet_BC[i].op_val)
+            op.resid .-= op.stiff[:,bcdof]*bcval
+            op.resid[bcdof] .= bcval
             op.stiff[bcdof, :] .= 0.0 
             op.stiff[:, bcdof] .= 0.0 
             op.jacob[bcdof,:] .= 0.0
             op.jacob[:,bcdof] .= 0.0
             op.stiff[bcdof, bcdof] = sparse(I, length(bcdof), length(bcdof))
-            op.stiff[bcdof, bcdof] = sparse(I, length(bcdof), length(bcdof))
+            op.jacob[bcdof, bcdof] = sparse(I, length(bcdof), length(bcdof))
         end
     end
     return nothing

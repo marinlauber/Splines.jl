@@ -79,7 +79,7 @@ aⁿ = zero(a0);
 xs = LinRange(ptLeft, ptRight, numElem+1)
 
 # time loop
-@gif for k = 2:Nₜ
+@gif for k = 2:2
 
     global dⁿ, vⁿ, aⁿ, F;
     global vⁿ⁺¹, aⁿ⁺¹, dⁿ⁺¹, dⁿ⁺ᵅ, vⁿ⁺ᵅ, aⁿ⁺ᵅ;
@@ -104,16 +104,11 @@ xs = LinRange(ptLeft, ptRight, numElem+1)
         aⁿ⁺ᵅ = αm*aⁿ⁺¹ + (1.0-αm)*aⁿ;
     
         # update stiffness and jacobian, linearised here
-        # Splines.update_global!(stiff, jacob, dⁿ⁺ᵅ, p.mesh, p.gauss_rule, p)
+        Splines.update_global!(stiff, jacob, dⁿ⁺ᵅ, p.mesh, p.gauss_rule, p)
     
         # update rhs vector
-        # Splines.update_external!(fext, p.mesh, p.f, p.gauss_rule)
-        # fext[2mesh.numBasis] += P*sin(2π*fhz[1]*tⁿ⁺ᵅ);
-
-        integrate!(stiff, jacob, dⁿ⁺ᵅ, fext, p)
+        Splines.update_external!(fext, p.mesh, p.f, p.gauss_rule)
         fext[2mesh.numBasis] += P*sin(2π*fhz[1]*tⁿ⁺ᵅ);
-
-        residuals!(resid, )
 
         # # apply BCs
         jacob .= αm/(β*Δt^2)*M + αf*jacob

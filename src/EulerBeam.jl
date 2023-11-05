@@ -296,8 +296,9 @@ function update_global!(global_stiff, global_jacob, x0, mesh, gauss_rule, proble
         cpts = mesh.controlPoints[1, curNodes]
         wgts = mesh.weights[curNodes]
 
-        localx = zeros(numNodes)
-        localy = zeros(numNodes)
+        # numNodes = length(curNodes)
+        # localx = zeros(numNodes)
+        # localy = zeros(numNodes)
 
         # integrate on element
         for iGauss = 1:length(gauss_rule.nodes)
@@ -325,9 +326,9 @@ function update_global!(global_stiff, global_jacob, x0, mesh, gauss_rule, proble
             global_stiff[curNodes.+off, curNodes.+off] += 0.5 * Jac_ref_par * Jac_par_phys * problem.EA * (du0dx + dw0dx^2) * (dR*dR') * gauss_rule.weights[iGauss]
             
             # external force at physical point
-            fi = fx[:,(iElem-1)*problem.mesh.numElem+iGauss]
-            localx += Jac_par_phys * Jac_ref_par * fi[1] * RR * problem.gauss_rule.weights[iGauss]
-            localy += Jac_par_phys * Jac_ref_par * fi[2] * RR * problem.gauss_rule.weights[iGauss]
+            # fi = fx[:,(iElem-1)*problem.mesh.numElem+iGauss]
+            # localx += Jac_par_phys * Jac_ref_par * fi[1] * RR * problem.gauss_rule.weights[iGauss]
+            # localy += Jac_par_phys * Jac_ref_par * fi[2] * RR * problem.gauss_rule.weights[iGauss]
             
             # only different entry of Jacobian
             global_jacob[curNodes.+off, curNodes.+off] += Jac_ref_par * Jac_par_phys * problem.EA * (dw0dx^2) * (dR*dR') * gauss_rule.weights[iGauss]
@@ -335,8 +336,8 @@ function update_global!(global_stiff, global_jacob, x0, mesh, gauss_rule, proble
             domainLength += Jac_ref_par * Jac_par_phys * gauss_rule.weights[iGauss]
         end
     end
-    external[curNodes] += localx
-    external[curNodes.+problem.mesh.numBasis] += localy
+    # external[curNodes] += localx
+    # external[curNodes.+problem.mesh.numBasis] += localy
     # enforce symmetry K21 -> K12
     global_stiff[off+1:2off,1:off] .= global_stiff[1:off,off+1:2off]
     # form jacobian
