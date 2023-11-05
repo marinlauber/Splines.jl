@@ -13,7 +13,7 @@ end
 
 function Mesh1D(ptLeft, ptRight, numElem, degP)
     nrb = nrbline(ptLeft, ptRight)
-    new_knots = collect(LinRange(ptLeft, ptRight, numElem+1)[2:end-1])
+    new_knots = collect(LinRange(0, 1, numElem+1)[2:end-1])
     nrb = nrbdegelev(nrb, [degP-1])
     nrb = nrbkntins(nrb, [new_knots])
     IGAmesh = genMesh(nrb)

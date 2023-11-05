@@ -3,15 +3,6 @@ using LinearAlgebra
 using SparseArrays
 using Plots
 
-abstract type OperatorType end
-struct TransientODEOperator <: OperatorType end
-
-function jacobian!(op::TransientODEOperator)
-end
-
-function residuals!(op::TransientODEOperator)
-end
-
 # Material properties and mesh
 numElem=4
 degP=3

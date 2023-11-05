@@ -13,7 +13,7 @@ P = 1.0
 exact_sol(x) = x.^2/(24EI).*(6 .- 4x .+ x.^2) # fixed - free UDL
 
 # mesh
-mesh, gauss_rule = Mesh1D(ptLeft, ptRight, numElem, degP)
+mesh, gauss_rule = Mesh1D([0.,0.], [1.,0.], numElem, degP)
 
 # boundary conditions: u(0)=w(0)=0.0, dw(0)/dx=0.0
 Dirichlet_BC = [

@@ -258,6 +258,8 @@ N = 24
 # A = triu(rand(N,N),1) + diagm(λ)
 A = rand(N,N) + diagm(λ)
 b = rand(N);
+# make it difficult
+b[N÷2:end] .*= 10
 
 # IQNILS method
 f(x) = b - A*x
@@ -265,11 +267,11 @@ f(x) = b - A*x
 @time sol,r1 = gmres(A,b,100);
 @assert L₂(f(sol)) < 1e-6
 
-x0 = copy(b)
+x0 = zero(b)
 sol,history = IterativeSolvers.gmres(A,b;log=true, reltol=1e-16)
 r3 = history.data[:resnorm]
 
-x0 = copy(b)
+x0 = zero(b)
 @time sol,r2 = IQNILS2(x0, f; ω=0.05)
 # @assert L₂(f(sol)) < 1e-6
 println("IQNILS: ", sol)
@@ -280,13 +282,13 @@ p = plot(r1, marker=:s, xaxis=:log10, yaxis=:log10, label="GMRES",
 plot!(p, r3, marker=:d, xaxis=:log10, yaxis=:log10, label="IterativeSolvers.GMRES")
 plot!(p, r2, marker=:o, xaxis=:log10, yaxis=:log10, label="IQN-ILS", legend=:bottomleft)
 
-x0 = copy(b)
+x0 = zero(b)
 @time sol,resid_relax = Relaxation(x0, f, 0.05)
 # @assert L₂(f(sol)) < 1e-6
 plot!(p, resid_relax, marker=:o, xaxis=:log10, yaxis=:log10, label="Relaxation", legend=:bottomleft)
 
 IQNSolver = IQNCoupling(N;ω=0.05)
-xᵏ = copy(b); rᵏ = f(xᵏ); k=1; resid=[]; sol=[]
+xᵏ = zero(b); rᵏ = f(xᵏ); k=1; resid=[]; sol=[]
 @time while L₂(rᵏ) > 1e-16 && k < 2N
     global xᵏ, rᵏ, k, resid, sol
     xᵏ = update(IQNSolver, xᵏ, rᵏ)
