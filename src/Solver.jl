@@ -1,35 +1,121 @@
 using NLsolve
 using ImplicitAD
 using LineSearches
+using StaticArrays
 
-# Abstract type for the solver
-abstract type ODESolver end
-# """
-# Generalized-α ODE solver
-# """
-# struct GeneralizedAlpha <: ODESolver
-#     nls::NonlinearSolver
-#     dt::Float64
-#     ρ∞::Float64
+# abstract type AbstractODEOperator end
+
+# struct ODEOperator <: AbstractODEOperator
+#     x :: AbstractArray{T}
+#     resid :: AbstractArray{T}
+#     jacob :: AbstractArray{T}
+#     p :: Dict{String,T}
 # end
 
-function static_nlsolve!(p, residual!, jacobian!)
+# struct ODESolver <: AbstractFEOperator end
 
+
+struct GeneralizedAlpha
+    op :: FEOperator
+    u ::Union{AbstractVector,Tuple{Vararg{AbstractVector}}}
+    αm :: Float64
+    αf :: Float64
+    β :: Float64
+    γ :: Float64
+    op_cache ::Union{AbstractVector,Tuple{Vararg{AbstractVector}}}
+    Δt :: Vector{Float64}
+    function GeneralizedAlpha(opr::FEOperator; ρ∞=0.5)
+        αm = (2.0 - ρ∞)/(ρ∞ + 1.0);
+        αf = 1.0/(1.0 + ρ∞)
+        γ = 0.5 - αf + αm;
+        β = 0.25*(1.0 - αf + αm)^2;
+        new(opr,(zero(opr.resid),zero(opr.resid),zero(opr.resid)),
+            αm,αf,β,γ,(zero(opr.resid),zero(opr.resid),zero(opr.resid)),[0.0])
+    end
+end
+
+"""
+    solve_step!(solver::GeneralizedAlpha,force::AbstractArray,Δt::Float64)
+
+steps a (potentially nonlinear) operator forward in time, given an external
+force and a time step size.
+"""
+function solve_step!(solver::GeneralizedAlpha, force, Δt)
+              
+    # useful
+    αf, αm, β, γ = solver.αf, solver.αm, solver.β, solver.γ
+
+    # structural time steps
+    tⁿ   = sum(solver.Δt[end])
+    tⁿ⁺ᵅ = αf*(tⁿ+Δt) + (1.0-αf)*tⁿ;
+
+    # predictor (initial guess) for the Newton-Raphson scheme
+    (dⁿ⁺¹, vⁿ⁺¹, aⁿ⁺¹) = solver.u
+    dⁿ=copy(dⁿ⁺¹); vⁿ=copy(vⁿ⁺¹); aⁿ=copy(aⁿ⁺¹);
+
+    # Newton-Raphson iterations loop
+    r₂ = 1.0; iter = 1;
+    while r₂ > 1.0e-6 && iter < 1000
+
+        # compute v_{n+1}, a_{n+1}, ... from "Isogeometric analysis: toward integration of CAD and FEA"
+        vⁿ⁺¹ = γ/(β*Δt)*dⁿ⁺¹ - γ/(β*Δt)*dⁿ + (1.0-γ/β)*vⁿ - Δt*(γ/2β-1.0)*aⁿ;
+        aⁿ⁺¹ = 1.0/(β*Δt^2)*dⁿ⁺¹ - 1.0/(β*Δt^2)*dⁿ - 1.0/(β*Δt)*vⁿ - (1.0/2β-1.0)*aⁿ;
+
+        # compute d_{n+af}, v_{n+af}, a_{n+am}, ...
+        dⁿ⁺ᵅ = αf*dⁿ⁺¹ + (1.0-αf)*dⁿ;
+        vⁿ⁺ᵅ = αf*vⁿ⁺¹ + (1.0-αf)*vⁿ;
+        aⁿ⁺ᵅ = αm*aⁿ⁺¹ + (1.0-αm)*aⁿ;
+
+        # update the jacobian, the residual and the external force
+        integrate!(solver.op, dⁿ⁺ᵅ, force)
+
+        # compute the jacobian and the residuals
+        solver.op.jacob .= αm/(β*Δt^2)*solver.op.mass + αf*solver.op.jacob
+        solver.op.resid .= solver.op.stiff*dⁿ⁺ᵅ + solver.op.mass*aⁿ⁺ᵅ - solver.op.ext
+
+        # apply BC
+        applyBC!(solver.op)
+
+        # check convergence
+        r₂ = norm(solver.op.resid);
+        if r₂ < 1.0e-6 && break; end
+
+        # newton solve for the displacement increment
+        dⁿ⁺¹ -= solver.op.jacob\solver.op.resid; iter += 1
+    end
+    # save variables
+    solver.u[1] .= dⁿ⁺¹
+    solver.u[2] .= vⁿ⁺¹
+    solver.u[3] .= aⁿ⁺¹
+end
+
+function lsolve!(op::FEOperator, force)
+
+    # update the jacobian, the residual and the external force
+    # linearized residuals
+    integrate!(op, zero(op.resid), force)
+
+    # compute the residuals
+    op.resid .= - op.ext
+
+    # apply BC
+    applyBC!(op)
+
+    # solve the system and return
+    -op.jacob\op.resid
+end
+
+function nlsolve!(op::FEOperator, x, force)
+    
     # unpack pre-allocated storage and the convergence flag
-    # @unpack x, resid, jacob, EI, EA, f, t, mesh, gauss_rule, Dirichlet_BC, Neumann_BC = p
-    @unpack x, resid, jacob = p
+    @unpack resid, jacob = op
 
     # warp the residual and the jacobian
-    # f!(resid, x) = residual!(resid, x, f, t, mesh, EI, EA, Dirichlet_BC, Neumann_BC, gauss_rule)
-    # j!(jacob, x) = jacobian!(jacob, x, f, mesh, EI, EA, Dirichlet_BC, Neumann_BC, gauss_rule)
-    f!(resid, x) = residual!(resid, x, p)
-    j!(jacob, x) = jacobian!(jacob, x, p)
+    f!(resid, x) = residual!(resid, x, force, op)
+    j!(jacob, x) = jacobian!(jacob, x, force, op)
 
     # prepare for solve
     df = NLsolve.OnceDifferentiable(f!, j!, x, resid, jacob)
-
-    # solve the system
-    # result = NLsolve.nlsolve(df, x, method=:newton)
 
     # # solve the system
     result = NLsolve.nlsolve(df, x,
@@ -42,147 +128,8 @@ function static_nlsolve!(p, residual!, jacobian!)
 
     # update the state, residual, jacobian, and convergence flag
     x .= result.zero
-    resid .= df.F
-    jacob .= df.DF
-
-    return result.zero
-end
-
-static_lsolve!(p) = static_lsolve!(p, static_residuals!, static_jacobian!)
-function static_lsolve!(p, residual!, jacobian!)
-
-    # unpack pre-allocated storage and the convergence flag
-    @unpack x, resid, jacob = p
-
-    # initial consition
-    x0 = zeros(length(x))
-
-    # update residual and the jacobian
-    residual!(resid, x0, p)
-    jacobian!(jacob, x0, p)
-    
-    # update the state "Newton's method"
-    x .= x0 .- ImplicitAD.implicit_linear(jacob, resid)
+    op.resid .= df.F
+    op.jacob .= df.DF
 
     return x
 end
-
-# function static_residuals!(resid, x0, f, t, mesh, EI, EA, Dirichlet_BC, Neumann_BC, gauss_rule)
-#     # try subtitute zero initial deflection and contraction
-#     u0 = x0[1:mesh.numBasis]
-#     w0 = x0[mesh.numBasis:2*mesh.numBasis]
-
-#     # compute matrix
-#     K11,K12,K22,J22 = assemble_stiff(mesh, u0, w0, EI, EA, gauss_rule)
-#     force = assemble_rhs(mesh, f, gauss_rule)
-#     tension = assemble_rhs(mesh, t, gauss_rule)
-
-#     # apply BC
-#     K22, rhs22 = applyBCNeumann(K22, force, Neumann_BC, mesh, gauss_rule);
-#     K22, rhs22 = applyBCDirichlet(K22, rhs22, Dirichlet_BC, mesh)
-    
-#     # Dirichlet only on the right-hand-side
-#     K11, rhs11 = applyBCDirichlet(K11, tension, Dirichlet_BC, mesh)
-#     K12 = applyBCDirichlet(K12, Dirichlet_BC, mesh)
-
-#     # assemble the whole system
-#     lhs, rhs = assemble(K11, K12, K22, rhs11, rhs22)
-
-#     # compute residuals
-#     resid .= lhs*x0 - rhs
-#     return nothing
-# end
-
-
-# function static_jacobian!(jacob, x0, f, mesh, EI, EA, Dirichlet_BC, Neumann_BC, gauss_rule)
-#     # try subtitute zero initial deflection and contraction
-#     u0 = x0[1:mesh.numBasis]
-#     w0 = x0[mesh.numBasis:2*mesh.numBasis]
-
-#     # compute matrix
-#     K11,K12,K22,J22 = assemble_stiff(mesh, u0, w0, EI, EA, gauss_rule)
-#     force = assemble_rhs(mesh, f, gauss_rule)
-
-#     # apply BC
-#     K22, rhs22 = applyBCNeumann(K22, force, Neumann_BC, mesh, gauss_rule);
-#     K22, rhs22 = applyBCDirichlet(K22, rhs22, Dirichlet_BC, mesh)
-#     J22 = applyBCDirichlet(J22, Dirichlet_BC, mesh)
-
-#     # Dirichlet only on the right
-#     K11, rhs11 = applyBCDirichlet(K11, force, Dirichlet_BC, mesh)
-#     K12 = applyBCDirichlet(K12, Dirichlet_BC, mesh)
-
-#     # assemble the whole system
-#     jacob .= Jacobian(K11, K12, K22, J22)
-#     return nothing
-# end
-
-
-# function dynamic_residuals!(resid, x0, M, a0, f, t, mesh, EI, EA, Dirichlet_BC, Neumann_BC, gauss_rule)
-#     # try subtitute zero initial deflection and contraction
-#     u0 = w0 = zero(x0[1:mesh.numBasis])
-
-#     # compute matrix
-#     K11,K12,K22,J22 = assemble_stiff(mesh, u0, w0, EI, EA, gauss_rule)
-#     force = assemble_rhs(mesh, f, gauss_rule)
-
-#     # apply BC
-#     K22, rhs22 = applyBCNeumann(K22, force, Neumann_BC, mesh, gauss_rule);
-#     K22, rhs22 = applyBCDirichlet(K22, rhs22, Dirichlet_BC, mesh)
-#     J22 = applyBCDirichlet(J22, Dirichlet_BC, mesh)
-
-#     # Dirichlet only on the right
-#     K11, rhs11 = applyBCDirichlet(K11, force, Dirichlet_BC, mesh)
-#     K12 = applyBCDirichlet(K12, Dirichlet_BC, mesh)
-
-#     # assemble the whole system
-#     K,F = assemble(K11, K12, K22, rhs11, rhs22)
-#     resid .= K*x0 + M*a0 + F
-#     return nothing
-# end
-
-# function dynamic_mass!(mass, mesh, m₀, Dirichlet_BC, Neumann_BC, gauss_rule)
-#     # compute inertia
-#     Mi = assemble_mass(mesh, m₀, gauss_rule)
-#     r22 = zeros(mesh.numBasis)
-#     M22,r22 = applyBCNeumann(Mi, r22, Neumann_BC, mesh, gauss_rule)
-#     M22,r22 = applyBCDirichlet(M22, r22, Dirichlet_BC, mesh)
-#     M11,r11 = applyBCDirichlet(Mi, zeros(mesh.numBasis), Dirichlet_BC, mesh)
-#     M,a0 = assemble(M11, 0*M11, M22, r11, r22);
-#     mass .= M
-#     return nothing
-# end
-
-# function dynamic_nljacobian!()
-#     continue
-# end
-
-# function dynamic_ljacobian!()
-#     continue
-# end
-
-# function dynamic_jacobian!(jacob, x0, f, M, α₁, α₂, β, Δt, mesh, EI, EA, Dirichlet_BC, Neumann_BC, gauss_rule)
-#     # try subtitute zero initial deflection and contraction
-#     u0 = x0[1:mesh.numBasis]
-#     w0 = x0[mesh.numBasis:2*mesh.numBasis]
-
-#     # compute matrix
-#     K11,K12,K22,J22 = assemble_stiff(mesh, u0, w0, EI, EA, gauss_rule)
-#     force = assemble_rhs(mesh, f, gauss_rule)
-
-#     # apply BC
-#     K22, rhs22 = applyBCNeumann(K22, force, Neumann_BC, mesh, gauss_rule);
-#     K22, rhs22 = applyBCDirichlet(K22, rhs22, Dirichlet_BC, mesh)
-#     J22 = applyBCDirichlet(J22, Dirichlet_BC, mesh)
-
-#     # Dirichlet only on the right
-#     K11, rhs11 = applyBCDirichlet(K11, force, Dirichlet_BC, mesh)
-#     K12 = applyBCDirichlet(K12, Dirichlet_BC, mesh)
-
-#     # assemble the whole system
-#     K = Jacobian(K11, K12, K22, J22)
-
-#     # for the jacobian
-#     jacob .= α₁/(β*Δt^2)*M +  α₂*K
-#     return nothing
-# end

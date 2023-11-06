@@ -4,19 +4,37 @@ using UnPack
 # Abstract FEA operaotr
 abstract type AbstractFEOperator end
 
+"""
+    FEOperator
+
+Defines a finite element operator for a beam element, with the following fields:
+    x :: Vector{Float64} : current solution
+    resid :: Vector{Float64} : residual
+    stiff :: Matrix{Float64} : stiffness matrix
+    jacob :: Matrix{Float64} : jacobian matrix
+    ext   :: Vector{Float64} : external force
+    mass :: Union{Float64, Matrix{Float64}} : mass matrix
+    mesh :: Mesh : mesh
+    gauss_rule :: GaussQuad : gauss quadrature rule
+    Dirichlet_BC :: Vector{Boundary1D} : Dirichlet boundary conditions
+    Neumann_BC :: Vector{Boundary1D} : Neumann boundary conditions
+    EI :: Float64 : bending stiffness
+    EA :: Float64 : axial stiffness
+"""
 struct FEOperator <: AbstractFEOperator
     x :: Vector{Float64}
     resid :: Vector{Float64}
     stiff :: Matrix{Float64}
     jacob :: Matrix{Float64}
     ext   :: Vector{Float64}
+    mass :: Union{Float64, Matrix{Float64}}
     mesh :: Mesh
     gauss_rule :: GaussQuad
     Dirichlet_BC :: Vector{Boundary1D}
     Neumann_BC :: Vector{Boundary1D}
     EI :: Float64
     EA :: Float64
-    function FEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC=[], Neumann_BC=[], )
+    function FEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC=[], Neumann_BC=[]; ρ::Function=(x)->-1.0)
         numNeuBC = length(Neumann_BC)
         # generate
         x = zeros(Float64, 2*mesh.numBasis+numNeuBC)
@@ -24,16 +42,77 @@ struct FEOperator <: AbstractFEOperator
         ext = zeros(Float64, 2*mesh.numBasis+numNeuBC)
         stiff = spzeros(2*mesh.numBasis+numNeuBC, 2*mesh.numBasis+numNeuBC)
         jacob = spzeros(2*mesh.numBasis+numNeuBC, 2*mesh.numBasis+numNeuBC)
-        new(x, resid, stiff, jacob, ext, mesh, gauss_rule, Dirichlet_BC, Neumann_BC, EI, EA)
+        mass = zeros(2*mesh.numBasis+numNeuBC, 2*mesh.numBasis+numNeuBC)
+        # no mass if not provided
+        ρ(0.5)>0.0 ? global_mass!(mass, mesh, ρ, gauss_rule) : mass = 0.0
+        new(x, resid, stiff, jacob, ext, mass, mesh, gauss_rule, Dirichlet_BC, Neumann_BC, EI, EA)
     end
 end
+# backward compatibiity
+EulerBeam(EI, EA, f, mesh, gr, D_BC=[], N_BC=[]) = FEOperator(mesh, gr, EI, EA, D_BC, N_BC)
 
+"""
+    residual(resid, x, force, op::FEOperator)
+
+Compute the residuals given a operator `op`, an initial solution `x` and an 
+external force `force`.
+"""
+function residual!(resid, x, force, op::FEOperator)
+    # update the jacobian, the residual and the external force
+    integrate!(op, x, force)
+
+    # apply BC
+    applyBC!(op)
+
+    # assign residual
+    resid .= op.stiff*x - op.ext
+    return nothing
+end
+
+
+"""
+    jacobian!(jacob, x, force, op::FEOperator)
+
+Compute the jacobia given a operator `op`, an initial solution `x` and an 
+external force `force`.
+"""
+function jacobian!(jacob, x, force, op::FEOperator)
+    # update the jacobian, the residual and the external force
+    integrate!(op, x, force)
+
+    # apply BC
+    applyBC!(op)
+
+    # assign jacobian
+    jacob .= op.jacob
+    return nothing
+end
+
+"""
+    integrate!(op::FEOperator, x0::Vector{Float64}, fx)
+
+Integrate the operator `op` given an initial solution `x0` and an external force. 
+This performs the element-wise integration og the different term in the governing equations
+"""
+# BenchmarkTools.Trial: 10000 samples with 1 evaluation.
+#  Range (min … max):  29.019 μs …  2.566 ms  ┊ GC (min … max):  0.00% … 97.31%
+#  Time  (median):     30.990 μs              ┊ GC (median):     0.00%
+#  Time  (mean ± σ):   37.714 μs ± 87.849 μs  ┊ GC (mean ± σ):  12.85% ±  5.44%
+
+#   ▃▆█▇▅▃▂▃▃▃▂▁                                                ▂
+#   █████████████▇▇▆▅▆▇▆▅▅▆▅▅▄▄▄▆▆▆▆▆▅▄▅▆▇█▇▆▆▆▆▅▄▅▇█▇▆▅▆▁▅▆██▇ █
+#   29 μs        Histogram: log(frequency) by time      68.9 μs <
+
+#  Memory estimate: 150.39 KiB, allocs estimate: 1160.
 function integrate!(op::FEOperator, x0::Vector{Float64}, fx)
     off = op.mesh.numBasis
 
+    # reset
     op.stiff[1:2off,1:2off] .= 0.;
     op.jacob[1:2off,1:2off] .= 0.;
+    op.ext .= 0.0;
 
+    # precompute bernstein basis
     B, dB, ddB = bernsteinBasis(op.gauss_rule.nodes, op.mesh.degP[1])
     domainLength = 0
     for iElem = 1:op.mesh.numElem
@@ -103,7 +182,16 @@ function integrate!(op::FEOperator, x0::Vector{Float64}, fx)
     return nothing
 end
 
+# BenchmarkTools.Trial: 10000 samples with 1 evaluation.
+#  Range (min … max):  11.909 μs …  4.296 ms  ┊ GC (min … max):  0.00% … 98.00%
+#  Time  (median):     12.763 μs              ┊ GC (median):     0.00%
+#  Time  (mean ± σ):   15.591 μs ± 93.350 μs  ┊ GC (mean ± σ):  13.21% ±  2.20%
 
+#     █▇▂                                                        
+#   ▃████▆▄▃▃▃▄▄▄▃▃▃▃▃▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▁▂▂▂▂▂▂▂▂▂▂▂▂▂▂▁▂▁▂ ▃
+#   11.9 μs         Histogram: frequency by time        24.5 μs <
+
+#  Memory estimate: 25.81 KiB, allocs estimate: 421.
 function applyBC!(op::FEOperator)
     # apply Neumann BC
     Bmat = spzeros(Float64, length(op.Neumann_BC), size(op.stiff, 2))
@@ -173,4 +261,52 @@ function applyBC!(op::FEOperator)
         end
     end
     return nothing
+end
+
+"""
+Integrate the (consistant) global mass matrix over the mesh, given a density.
+"""
+function global_mass!(mass, mesh::Mesh, ρ, gauss_rule)
+    B, dB = bernsteinBasis(gauss_rule.nodes, mesh.degP[1])
+    domainLength = 0
+    # mass = spzeros(Float64, mesh.numBasis, mesh.numBasis)
+    for iElem = 1:mesh.numElem
+        uMin = mesh.elemVertex[iElem, 1]
+        uMax = mesh.elemVertex[iElem, 2]
+        Jac_ref_par = (uMax-uMin)/2
+
+        #compute the (B-)spline basis functions and derivatives with Bezier extraction
+        N_mat = B * mesh.C[iElem]'
+        dN_mat = dB * mesh.C[iElem]'/Jac_ref_par
+
+        #compute the rational spline basis
+        curNodes = mesh.elemNode[iElem]
+        numNodes = length(curNodes)
+        cpts = mesh.controlPoints[1, curNodes]
+        wgts = mesh.weights[curNodes]
+        localMass = zeros(numNodes, numNodes)
+        for iGauss = 1:length(gauss_rule.nodes)
+            #compute the rational basis
+            RR = N_mat[iGauss,:].* wgts
+            dR = dN_mat[iGauss,:].* wgts
+            w_sum = sum(RR)
+            dw_xi = sum(dR)
+            dR = dR/w_sum - RR*dw_xi/w_sum^2
+
+            #compute the Jacobian of the transformation from parameter to physical space
+            dxdxi = dR' * cpts
+            Jac_par_phys = det(dxdxi)
+
+            RR /= w_sum
+            phys_pt = RR' * cpts
+            localMass += Jac_par_phys * Jac_ref_par * ρ(phys_pt) * (RR*RR') * gauss_rule.weights[iGauss]
+            domainLength += Jac_par_phys * Jac_ref_par * gauss_rule.weights[iGauss]
+        end
+        #@show localMass
+        #readline(stdin)
+        mass[curNodes, curNodes] += localMass
+        mass[curNodes.+mesh.numBasis, curNodes.+mesh.numBasis] += localMass
+    end
+    # @show domainLength
+    return mass
 end
