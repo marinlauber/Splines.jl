@@ -114,6 +114,7 @@ function integrate!(op::FEOperator, x0::Vector{Float64}, fx)
 
     # precompute bernstein basis
     B, dB, ddB = bernsteinBasis(op.gauss_rule.nodes, op.mesh.degP[1])
+    numGauss = length(op.gauss_rule.nodes)
     domainLength = 0
     for iElem = 1:op.mesh.numElem
         uMin = op.mesh.elemVertex[iElem, 1]
@@ -154,10 +155,10 @@ function integrate!(op::FEOperator, x0::Vector{Float64}, fx)
             du0dx = dR' * x0[curNodes]
             dw0dx = dR' * x0[curNodes.+off]
 
-            # external force at physical point
-            fi = fx[:,(iElem-1)*op.mesh.numElem+iGauss]
-            localx += Jac_par_phys * Jac_ref_par * fi[1] * RR * op.gauss_rule.weights[iGauss]
-            localy += Jac_par_phys * Jac_ref_par * fi[2] * RR * op.gauss_rule.weights[iGauss]
+            # external force at physical point fx{size{2,numElem*numGauss}]}
+            fi = fx[:,(iElem-1)*numGauss+iGauss]
+            op.ext[curNodes     ] += Jac_par_phys * Jac_ref_par * fi[1] * RR * op.gauss_rule.weights[iGauss]
+            op.ext[curNodes.+off] += Jac_par_phys * Jac_ref_par * fi[2] * RR * op.gauss_rule.weights[iGauss]
 
             # compute the different terms
             op.stiff[curNodes, curNodes] += Jac_ref_par * Jac_par_phys * op.EA * (dR*dR') * op.gauss_rule.weights[iGauss]
@@ -170,8 +171,6 @@ function integrate!(op::FEOperator, x0::Vector{Float64}, fx)
             # check if the domain is correct
             domainLength += Jac_ref_par * Jac_par_phys * op.gauss_rule.weights[iGauss]
         end
-        op.ext[curNodes] += localx
-        op.ext[curNodes.+op.mesh.numBasis] += localy
     end
     # enforce symmetry K21 -> K12
     op.stiff[off+1:2off,1:off] .= op.stiff[1:off,off+1:2off]

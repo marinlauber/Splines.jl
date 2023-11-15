@@ -54,7 +54,11 @@ function uv_integration(op::FEOperator)
     end
     return uv
 end
-
+# reshape to displacements
+function dⁿ(ga::GeneralizedAlpha)
+    return reshape(ga.u[1][1:2ga.op.mesh.numBasis],(ga.op.mesh.numBasis,2))'
+end
+export dⁿ, uv_integration
 # """
 #     step in time
 # """

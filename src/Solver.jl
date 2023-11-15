@@ -24,7 +24,7 @@ struct GeneralizedAlpha
     γ :: Float64
     op_cache ::Union{AbstractVector,Tuple{Vararg{AbstractVector}}}
     Δt :: Vector{Float64}
-    function GeneralizedAlpha(opr::FEOperator; ρ∞=0.5)
+    function GeneralizedAlpha(opr::FEOperator; ρ∞=1.0)
         αm = (2.0 - ρ∞)/(ρ∞ + 1.0);
         αf = 1.0/(1.0 + ρ∞)
         γ = 0.5 - αf + αm;

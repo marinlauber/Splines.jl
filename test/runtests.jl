@@ -36,7 +36,7 @@ function test_fixed_fixed_UDL(numElem=2, degP=3)
     operator = FEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC, Neumann_BC)
 
     # uniform external loading at integration points
-    force = zeros(2, 2operator.mesh.numBasis); force[2,:] .= 1.0
+    force = zeros(2,length(uv_integration(operator))); force[2,:] .= 1.0
     result = lsolve!(operator, force)
 
     u0 = result[1:mesh.numBasis]
@@ -77,7 +77,7 @@ function test_pinned_pinned_UDL(numElem=2, degP=3)
     operator = FEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC, Neumann_BC)
 
     # uniform external loading at integration points
-    force = zeros(2, 2operator.mesh.numBasis); force[2,:] .= 1.0
+    force = zeros(2,length(uv_integration(operator))); force[2,:] .= 1.0
     result = lsolve!(operator, force)
 
     # get the solution
@@ -117,7 +117,7 @@ function test_fixed_free_UDL(numElem=2, degP=3)
     operator = FEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC, Neumann_BC)
 
     # uniform external loading at integration points
-    force = zeros(2, 2operator.mesh.numBasis); force[2,:] .= 1.0
+    force = zeros(2,length(uv_integration(operator))); force[2,:] .= 1.0
     result = lsolve!(operator, force)
 
     # get the results
@@ -161,7 +161,7 @@ function test_fixed_free_PL(numElem=2, degP=3)
     operator = FEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC, Neumann_BC)
 
     # linearized residuals
-    integrate!(operator, zero(operator.resid), zeros(2,2operator.mesh.numBasis))
+    integrate!(operator, zero(operator.resid), zeros(2,length(uv_integration(operator))))
 
     # compute the residuals
     operator.resid .= - operator.ext
@@ -218,7 +218,7 @@ function test_fixed_free(numElem=2, degP=3)
 
     # unpack pre-allocated storage and the convergence flag
     @unpack resid, jacob = operator
-    f = zeros(2,4length(resid))
+    f = zeros(2,length(uv_integration(operator)))
     x = zero(resid)
 
     # warp the residual and the jacobian

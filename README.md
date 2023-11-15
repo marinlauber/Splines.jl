@@ -2,7 +2,7 @@
 
 ###  Isogeometric Analysis of non-linear Euler-Bernoulli Beams
 
-![](NURBS.svg)
+![](./images/NURBS.svg)
 
 
 [![Build Status](https://github.com/marinlauber/Splines.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/marinlauber/Splines.jl/actions/workflows/CI.yml?query=branch%3Amain)
@@ -10,19 +10,41 @@
 ##### Things to do:
 
 - [x] Validate on small deformation problems
-- [ ] Clean current implementation
+- [x] Clean current implementation
 - [x] Implement dynamic solver based on HHT-α method
-- [ ] Implement Quasi-Newton acceleration for the coupling 
-- [ ] Bind to [`WaterLily.jl`](https://github.com/weymouth/WaterLily.jl) via [`ParametricBodies.jl`](https://github.com/weymouth/ParametricBodies.jl) for fluid-structure interaction
+- [x] Implement Quasi-Newton acceleration for the coupling 
+- [x] Bind to [`WaterLily.jl`](https://github.com/weymouth/WaterLily.jl) via [`ParametricBodies.jl`](https://github.com/weymouth/ParametricBodies.jl) for fluid-structure interaction
 - [ ] Validate on finite (i.e. large) deformation problems
 - [ ] Benchmark solver
 - [ ] Write better tests
 
+
+### Test on analytic solutions
+
+The analytical solution for this problem is
+$$
+w(x/L) = \frac{pL^4}{24EI}\left(\frac{x}{L} - 2\left(\frac{x}{L}\right)^3 + \left(\frac{x}{L}\right)^4\right)
+$$
+Using both 2nd and 3rd-order basis function (1st order cannot be used as the Euler-Bernoulli beam requires a continuous second derivative) we obtain the following results, which is exact for 3rd-order basis functions.
+
+Similar results are obtained for a fixed-fixed beam, where the analytical solution is now
+$$
+w(x/L) = \frac{1}{24EI}\left(\frac x L\right)^2\left(1 - \frac{x}{L}\right)^2
+$$
+
+![](./images/nurbs_simple_beam.svg)
+
+### Dynamic non-linear cantilever beam
+
+The following results are obtained for a cantilever beam with a point load at the tip. The beam is discretized using 3rd-order basis functions and the periodic forcing is applied at the first resonant frequency
+
+![](./images/beam_vibration.gif)
+
 #### Current usage
 
-Developement means using it this way
+Development stage means that to use this package it is best to `dev` it
 
 ```julia
-] add https://github.com/marinlauber/Splines.jl
+] dev https://github.com/marinlauber/Splines.jl
 ```
 
