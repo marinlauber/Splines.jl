@@ -3,18 +3,6 @@ using ImplicitAD
 using LineSearches
 using StaticArrays
 
-# abstract type AbstractODEOperator end
-
-# struct ODEOperator <: AbstractODEOperator
-#     x :: AbstractArray{T}
-#     resid :: AbstractArray{T}
-#     jacob :: AbstractArray{T}
-#     p :: Dict{String,T}
-# end
-
-# struct ODESolver <: AbstractFEOperator end
-
-
 struct GeneralizedAlpha
     op :: FEOperator
     u ::Union{AbstractVector,Tuple{Vararg{AbstractVector}}}
@@ -22,15 +10,13 @@ struct GeneralizedAlpha
     αf :: Float64
     β :: Float64
     γ :: Float64
-    op_cache ::Union{AbstractVector,Tuple{Vararg{AbstractVector}}}
     Δt :: Vector{Float64}
     function GeneralizedAlpha(opr::FEOperator; ρ∞=1.0)
         αm = (2.0 - ρ∞)/(ρ∞ + 1.0);
         αf = 1.0/(1.0 + ρ∞)
         γ = 0.5 - αf + αm;
         β = 0.25*(1.0 - αf + αm)^2;
-        new(opr,(zero(opr.resid),zero(opr.resid),zero(opr.resid)),
-            αm,αf,β,γ,(zero(opr.resid),zero(opr.resid),zero(opr.resid)),[0.0])
+        new(opr,(zero(opr.resid),zero(opr.resid),zero(opr.resid)),αm,αf,β,γ,[0.0])
     end
 end
 
@@ -70,7 +56,7 @@ function solve_step!(solver::GeneralizedAlpha, force, Δt)
         integrate!(solver.op, dⁿ⁺ᵅ, force)
 
         # compute the jacobian and the residuals
-        solver.op.jacob .= αm/(β*Δt^2)*solver.op.mass + αf*solver.op.jacob
+        solver.op.jacob .= αm/(β*Δt^2)*solver.op.mass .+ αf*solver.op.jacob
         solver.op.resid .= solver.op.stiff*dⁿ⁺ᵅ + solver.op.mass*aⁿ⁺ᵅ - solver.op.ext
 
         # apply BC

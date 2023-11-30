@@ -108,9 +108,7 @@ function integrate!(op::FEOperator, x0::Vector{Float64}, fx)
     off = op.mesh.numBasis
 
     # reset
-    op.stiff[1:2off,1:2off] .= 0.;
-    op.jacob[1:2off,1:2off] .= 0.;
-    op.ext .= 0.0;
+    op.stiff .= 0.; op.jacob .= 0.; op.ext .= 0.0;
 
     # precompute bernstein basis
     B, dB, ddB = bernsteinBasis(op.gauss_rule.nodes, op.mesh.degP[1])
@@ -130,11 +128,6 @@ function integrate!(op::FEOperator, x0::Vector{Float64}, fx)
         curNodes = op.mesh.elemNode[iElem]
         cpts = op.mesh.controlPoints[1, curNodes]
         wgts = op.mesh.weights[curNodes]
-
-        # local external force
-        numNodes = length(curNodes)
-        localx = zeros(numNodes)
-        localy = zeros(numNodes)
 
         # integrate on element
         for iGauss = 1:length(op.gauss_rule.nodes)
