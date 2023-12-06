@@ -1,11 +1,11 @@
 using SparseArrays
 using UnPack
 
-# Abstract FEA operaotr
+# Abstract FEA operator
 abstract type AbstractFEOperator end
 
 """
-    FEOperator
+    StaticFEOperator
 
 Defines a finite element operator for a beam element, with the following fields:
     x :: Vector{Float64} : current solution
@@ -21,7 +21,7 @@ Defines a finite element operator for a beam element, with the following fields:
     EI :: Float64 : bending stiffness
     EA :: Float64 : axial stiffness
 """
-struct FEOperator <: AbstractFEOperator
+struct StaticFEOperator <: AbstractFEOperator
     x :: Vector{Float64}
     resid :: Vector{Float64}
     stiff :: Matrix{Float64}
@@ -34,7 +34,7 @@ struct FEOperator <: AbstractFEOperator
     Neumann_BC :: Vector{Boundary1D}
     EI :: Float64
     EA :: Float64
-    function FEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC=[], Neumann_BC=[]; ρ::Function=(x)->-1.0)
+    function StaticFEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC=[], Neumann_BC=[]; ρ::Function=(x)->-1.0)
         numNeuBC = length(Neumann_BC)
         # generate
         x = zeros(Float64, 2*mesh.numBasis+numNeuBC)
@@ -49,15 +49,53 @@ struct FEOperator <: AbstractFEOperator
     end
 end
 # backward compatibiity
-EulerBeam(EI, EA, f, mesh, gr, D_BC=[], N_BC=[]) = FEOperator(mesh, gr, EI, EA, D_BC, N_BC)
-
+# EulerBeam(EI, EA, f, mesh, gr, D_BC=[], N_BC=[]) = StaticFEOperator(mesh, gr, EI, EA, D_BC, N_BC)
 """
-    residual(resid, x, force, op::FEOperator)
+ DynamicFeOperator
+"""
+struct DynamicFEOperator{T,Vf<:AbstractArray{T},Mf<:AbstractArray{T}} <: AbstractFEOperator
+    x    :: Vf
+    resid:: Vf
+    ext  :: Vf
+    stiff:: Mf
+    jacob:: Mf
+    mass :: Mf
+    mesh :: Mesh
+    gauss_rule :: GaussQuad
+    Dirichlet_BC :: Vector{Boundary1D}
+    Neumann_BC   :: Vector{Boundary1D}
+    EI :: T
+    EA :: T
+    u ::Union{AbstractVector,Tuple{Vararg{AbstractVector}}}
+    αm :: T
+    αf :: T
+    β :: T
+    γ :: T
+    Δt :: Vector{T}
+    function DynamicFEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC=[], Neumann_BC=[]; 
+                               ρ::Function=(x)->-1.0, f=Array, ρ∞=1.0, T=Float64)
+        # time integration parameters
+        αm = (2.0 - ρ∞)/(ρ∞ + 1.0);
+        αf = 1.0/(1.0 + ρ∞)
+        γ = 0.5 - αf + αm;
+        β = 0.25*(1.0 - αf + αm)^2;
+        # generate
+        Nd = 2*mesh.numBasis+length(Neumann_BC); Ng = (Nd,Nd)
+        x, r, q = zeros(T, Nd) |> f, zeros(T, Nd) |> f, zeros(T, Nd) |> f
+        K, J, M = zeros(T,Ng) |> f, zeros(T,Ng) |> f, zeros(T,Ng) |> f
+        # can be made nicer
+        global_mass!(M, mesh, ρ, gauss_rule)
+        new{T,typeof(x),typeof(K)}(x,r,q,K,J,M,mesh,gauss_rule,Dirichlet_BC,Neumann_BC,EI,EA,
+                                  (zero(r),zero(r),zero(r)),αm,αf,β,γ,[0.0])
+    end
+end
+"""
+    residual(resid, x, force, op::StaticFEOperator)
 
 Compute the residuals given a operator `op`, an initial solution `x` and an 
 external force `force`.
 """
-function residual!(resid, x, force, op::FEOperator)
+function residual!(resid, x, force, op::AbstractFEOperator)
     # update the jacobian, the residual and the external force
     integrate!(op, x, force)
 
@@ -71,12 +109,12 @@ end
 
 
 """
-    jacobian!(jacob, x, force, op::FEOperator)
+    jacobian!(jacob, x, force, op::StaticFEOperator)
 
 Compute the jacobia given a operator `op`, an initial solution `x` and an 
 external force `force`.
 """
-function jacobian!(jacob, x, force, op::FEOperator)
+function jacobian!(jacob, x, force, op::AbstractFEOperator)
     # update the jacobian, the residual and the external force
     integrate!(op, x, force)
 
@@ -89,7 +127,7 @@ function jacobian!(jacob, x, force, op::FEOperator)
 end
 
 """
-    integrate!(op::FEOperator, x0::Vector{Float64}, fx)
+    integrate!(op::StaticFEOperator, x0::Vector{Float64}, fx)
 
 Integrate the operator `op` given an initial solution `x0` and an external force. 
 This performs the element-wise integration og the different term in the governing equations
@@ -104,7 +142,7 @@ This performs the element-wise integration og the different term in the governin
 #   29 μs        Histogram: log(frequency) by time      68.9 μs <
 
 #  Memory estimate: 150.39 KiB, allocs estimate: 1160.
-function integrate!(op::FEOperator, x0::Vector{Float64}, fx)
+function integrate!(op::AbstractFEOperator, x0::Vector{Float64}, fx)
     off = op.mesh.numBasis
 
     # reset
@@ -126,22 +164,20 @@ function integrate!(op::FEOperator, x0::Vector{Float64}, fx)
 
         #compute the rational spline basis
         curNodes = op.mesh.elemNode[iElem]
-        cpts = op.mesh.controlPoints[1, curNodes]
-        wgts = op.mesh.weights[curNodes]
 
         # integrate on element
         for iGauss = 1:length(op.gauss_rule.nodes)
             #compute the rational basis
-            RR = N_mat[iGauss,:].* wgts
-            dR = dN_mat[iGauss,:].* wgts
-            ddR = ddN_mat[iGauss,:].* wgts
+            RR = N_mat[iGauss,:].* op.mesh.weights[curNodes]
+            dR = dN_mat[iGauss,:].* op.mesh.weights[curNodes]
+            ddR = ddN_mat[iGauss,:].* op.mesh.weights[curNodes]
             w_sum = sum(RR)
             dw_xi = sum(dR)
             dR = dR/w_sum - RR*dw_xi/w_sum^2
             ddR = ddR/w_sum - 2*dR*dw_xi/w_sum^2 - RR*sum(ddR)/w_sum^2 + 2*RR*dw_xi^2/w_sum^3
 
             #compute the derivatives w.r.t to the physical space
-            dxdxi = dR' * cpts
+            dxdxi = dR' * op.mesh.controlPoints[1, curNodes]
             Jac_par_phys = det(dxdxi)
 
             # compute linearised terms using the current solution
@@ -184,7 +220,7 @@ end
 #   11.9 μs         Histogram: frequency by time        24.5 μs <
 
 #  Memory estimate: 25.81 KiB, allocs estimate: 421.
-function applyBC!(op::FEOperator)
+function applyBC!(op::AbstractFEOperator)
     # apply Neumann BC
     Bmat = spzeros(Float64, length(op.Neumann_BC), size(op.stiff, 2))
     for i=eachindex(op.Neumann_BC)
