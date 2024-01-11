@@ -28,8 +28,8 @@ end
 # reshape to displacements
 points(a) = dⁿ(a)
 function dⁿ(op::AbstractFEOperator)
-    return reshape(ga.u[1][1:2ga.op.mesh.numBasis],(op.mesh.numBasis,2))'
+    return reshape(op.u[1][1:2op.mesh.numBasis],(op.mesh.numBasis,2))'
 end
 function vⁿ(op::AbstractFEOperator)
-    return reshape(ga.u[2][1:2ga.op.mesh.numBasis],(op.mesh.numBasis,2))'
+    return reshape(op.u[2][1:2op.mesh.numBasis],(op.mesh.numBasis,2))'
 end
