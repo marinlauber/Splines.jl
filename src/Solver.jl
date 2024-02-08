@@ -181,7 +181,7 @@ function solve_step!(op::DynamicFEOperator, force, Δt)
 end
 
 
-function relaxation!(op::AbstractFEOperator, BC=[]; ρ::Function=i->1.0, Δt=0.01, N=10_000)
+function relaxation!(op::AbstractFEOperator, force, BC=[]; ρ::Function=i->1.0, Δt=0.01, N=10_000)
 
     mass = zero(op.stiff)
     global_mass!(mass, op.mesh, ρ, op.gauss_rule)

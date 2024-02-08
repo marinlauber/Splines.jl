@@ -24,7 +24,7 @@ operator = DynamicFEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC, Neumann_BC)
 # uniform external loading at integration points
 force = zeros(2,length(uv_integration(operator))); force[2,:] .= 1
 
-result = relaxation!(operator,[1,5,6,10])
+result = relaxation!(operator,force,[1,5,6,10])
 
 u0 = result[1:mesh.numBasis]
 w0 = result[mesh.numBasis+1:2mesh.numBasis]
