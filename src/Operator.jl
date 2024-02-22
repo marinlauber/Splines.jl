@@ -1,59 +1,71 @@
-using SparseArrays
-using UnPack
-
-# Abstract FEA operator
+# Abstract FEA operator and time integrator
 abstract type AbstractFEOperator end
-
+abstract type GeneralizedAlpha end
+abstract type Newmark end
 """
-    StaticFEOperator
+    StaticFEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC=[], Neumann_BC=[];
+                     ρ::Function=(x)->-1.0, f=Array, T=Float64)
 
 Defines a finite element operator for a beam element, with the following fields:
-    x :: Vector{Float64} : current solution
-    resid :: Vector{Float64} : residual
-    stiff :: Matrix{Float64} : stiffness matrix
-    jacob :: Matrix{Float64} : jacobian matrix
-    ext   :: Vector{Float64} : external force
-    mass :: Union{Float64, Matrix{Float64}} : mass matrix
-    mesh :: Mesh : mesh
-    gauss_rule :: GaussQuad : gauss quadrature rule
-    Dirichlet_BC :: Vector{Boundary1D} : Dirichlet boundary conditions
-    Neumann_BC :: Vector{Boundary1D} : Neumann boundary conditions
-    EI :: Float64 : bending stiffness
-    EA :: Float64 : axial stiffness
+    x     : Vector of the current solution
+    resid : Vector of residuals
+    ext   : Vector of external force
+    stiff : Stiffness matrix
+    jacob : Jacobian matrix
+    mass  : Mass or mass matrix, depending on the problem
+    mesh  : Isogeometric mesh
+    gauss_rule    : Gauss quadrature rule
+    Dirichlet_BC  : Vector of Dirichlet boundary conditions
+    Neumann_BC    : Vector of Neumann boundary conditions
+    EI : Coefficient of bending stiffness
+    EA : Coefficient of axial stiffness
 """
-struct StaticFEOperator <: AbstractFEOperator
-    x :: Vector{Float64}
-    resid :: Vector{Float64}
-    stiff :: Matrix{Float64}
-    jacob :: Matrix{Float64}
-    ext   :: Vector{Float64}
-    mass :: Union{Float64, Matrix{Float64}}
-    mesh :: Mesh
-    gauss_rule :: GaussQuad
+struct StaticFEOperator{T,Vf<:AbstractArray{T},Mf<:AbstractArray{T}} <: AbstractFEOperator
+    x     :: Vf
+    resid :: Vf
+    ext   :: Vf
+    stiff :: Mf
+    jacob :: Mf
+    mass  :: Union{T,Mf}
+    mesh  :: Mesh
+    gauss_rule   :: GaussQuad
     Dirichlet_BC :: Vector{Boundary1D}
-    Neumann_BC :: Vector{Boundary1D}
-    EI :: Float64
-    EA :: Float64
-    function StaticFEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC=[], Neumann_BC=[]; ρ::Function=(x)->-1.0)
-        numNeuBC = length(Neumann_BC)
+    Neumann_BC   :: Vector{Boundary1D}
+    EI :: T
+    EA :: T
+    function StaticFEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC=[], Neumann_BC=[];
+                              ρ::Function=(x)->-1.0, f=Array, T=Float64)
         # generate
-        x = zeros(Float64, 2*mesh.numBasis+numNeuBC)
-        resid = zeros(Float64, 2*mesh.numBasis+numNeuBC)
-        ext = zeros(Float64, 2*mesh.numBasis+numNeuBC)
-        stiff = spzeros(2*mesh.numBasis+numNeuBC, 2*mesh.numBasis+numNeuBC)
-        jacob = spzeros(2*mesh.numBasis+numNeuBC, 2*mesh.numBasis+numNeuBC)
-        mass = zeros(2*mesh.numBasis+numNeuBC, 2*mesh.numBasis+numNeuBC)
+        Nd = 2*mesh.numBasis+length(Neumann_BC); Ng = (Nd,Nd)
+        x, r, q = zeros(T,Nd) |> f, zeros(T,Nd) |> f, zeros(T,Nd) |> f
+        K, J, M = zeros(T,Ng) |> f, zeros(T,Ng) |> f, zeros(T,Ng) |> f
         # no mass if not provided
-        ρ(0.5)>0.0 ? global_mass!(mass, mesh, ρ, gauss_rule) : mass = 0.0
-        new(x, resid, stiff, jacob, ext, mass, mesh, gauss_rule, Dirichlet_BC, Neumann_BC, EI, EA)
+        ρ(0.5)>0.0 ? global_mass!(M, mesh, ρ, gauss_rule) : M = 0.0
+        new{T,typeof(x),typeof(K)}(x,r,q,K,J,M,mesh,gauss_rule,Dirichlet_BC,Neumann_BC,EI,EA)
     end
 end
-# backward compatibiity
-# EulerBeam(EI, EA, f, mesh, gr, D_BC=[], N_BC=[]) = StaticFEOperator(mesh, gr, EI, EA, D_BC, N_BC)
 """
- DynamicFeOperator
+    DynamicFEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC=[], Neumann_BC=[]; 
+                      ρ::Function=(x)->-1.0, f=Array, ρ∞=1.0, T=Float64, I=GeneralizedAlpha)
+
+Defines a finite element operator for a beam element, with the following fields:
+    x     : Vector of the current solution
+    resid : Vector of residuals
+    ext   : Vector of external force
+    stiff : Stiffness matrix
+    jacob : Jacobian matrix
+    mass  : Mass or mass matrix, depending on the problem
+    mesh  : Isogeometric mesh
+    gauss_rule    : Gauss quadrature rule
+    Dirichlet_BC  : Vector of Dirichlet boundary conditions
+    Neumann_BC    : Vector of Neumann boundary conditions
+    EI : Coefficient of bending stiffness
+    EA : Coefficient of axial stiffness
+    f : Type of storage for the structure
+    ρ∞: Spectral radius of the time integrator
+    I : Time integrator, GeneralizedAlpha or Newmark
 """
-struct DynamicFEOperator{T,Vf<:AbstractArray{T},Mf<:AbstractArray{T}} <: AbstractFEOperator
+struct DynamicFEOperator{I,T,Vf<:AbstractArray{T},Mf<:AbstractArray{T}} <: AbstractFEOperator
     x    :: Vf
     resid:: Vf
     ext  :: Vf
@@ -73,7 +85,7 @@ struct DynamicFEOperator{T,Vf<:AbstractArray{T},Mf<:AbstractArray{T}} <: Abstrac
     γ :: T
     Δt :: Vector{T}
     function DynamicFEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC=[], Neumann_BC=[]; 
-                               ρ::Function=(x)->-1.0, f=Array, ρ∞=1.0, T=Float64)
+                               ρ::Function=(x)->-1.0, f=Array, ρ∞=1.0, T=Float64, I=GeneralizedAlpha)
         # time integration parameters
         αm = (2.0 - ρ∞)/(ρ∞ + 1.0);
         αf = 1.0/(1.0 + ρ∞)
@@ -81,18 +93,18 @@ struct DynamicFEOperator{T,Vf<:AbstractArray{T},Mf<:AbstractArray{T}} <: Abstrac
         β = 0.25*(1.0 - αf + αm)^2;
         # generate
         Nd = 2*mesh.numBasis+length(Neumann_BC); Ng = (Nd,Nd)
-        x, r, q = zeros(T, Nd) |> f, zeros(T, Nd) |> f, zeros(T, Nd) |> f
+        x, r, q = zeros(T,Nd) |> f, zeros(T,Nd) |> f, zeros(T,Nd) |> f
         K, J, M = zeros(T,Ng) |> f, zeros(T,Ng) |> f, zeros(T,Ng) |> f
         # can be made nicer
         global_mass!(M, mesh, ρ, gauss_rule)
-        new{T,typeof(x),typeof(K)}(x,r,q,K,J,M,mesh,gauss_rule,Dirichlet_BC,Neumann_BC,EI,EA,
-                                  (zero(r),zero(r),zero(r)),αm,αf,β,γ,[0.0])
+        new{I,T,typeof(x),typeof(K)}(x,r,q,K,J,M,mesh,gauss_rule,Dirichlet_BC,Neumann_BC,EI,EA,
+                                    (zero(r),zero(r),zero(r)),αm,αf,β,γ,[0.0])
     end
 end
 """
-    residual(resid, x, force, op::StaticFEOperator)
+    residual(resid, x, force, op::AbstractFEOperator)
 
-Compute the residuals given a operator `op`, an initial solution `x` and an 
+Compute the residuals of a gicen operator `op`, using an initial solution `x` and an 
 external force `force`.
 """
 function residual!(resid, x, force, op::AbstractFEOperator)
@@ -109,9 +121,9 @@ end
 
 
 """
-    jacobian!(jacob, x, force, op::StaticFEOperator)
+    jacobian!(jacob, x, force, op::AbstractFEOperator)
 
-Compute the jacobia given a operator `op`, an initial solution `x` and an 
+Compute the Jacobian of a  given operator `op`, using an initial solution `x` and an 
 external force `force`.
 """
 function jacobian!(jacob, x, force, op::AbstractFEOperator)
@@ -127,10 +139,10 @@ function jacobian!(jacob, x, force, op::AbstractFEOperator)
 end
 
 """
-    integrate!(op::StaticFEOperator, x0::Vector{Float64}, fx)
+    integrate!(op::AbstractFEOperator, x0::Vector{Float64}, fx)
 
 Integrate the operator `op` given an initial solution `x0` and an external force. 
-This performs the element-wise integration og the different term in the governing equations
+This performs the element-wise integration of the different term in the governing equations.
 """
 # BenchmarkTools.Trial: 10000 samples with 1 evaluation.
 #  Range (min … max):  29.019 μs …  2.566 ms  ┊ GC (min … max):  0.00% … 97.31%
@@ -142,7 +154,7 @@ This performs the element-wise integration og the different term in the governin
 #   29 μs        Histogram: log(frequency) by time      68.9 μs <
 
 #  Memory estimate: 150.39 KiB, allocs estimate: 1160.
-function integrate!(op::AbstractFEOperator, x0::Vector{Float64}, fx)
+function integrate!(op::AbstractFEOperator, x0::Vector, fx)
     off = op.mesh.numBasis
 
     # reset
@@ -209,7 +221,6 @@ function integrate!(op::AbstractFEOperator, x0::Vector{Float64}, fx)
     # @show domainLength
     return nothing
 end
-
 # BenchmarkTools.Trial: 10000 samples with 1 evaluation.
 #  Range (min … max):  11.909 μs …  4.296 ms  ┊ GC (min … max):  0.00% … 98.00%
 #  Time  (median):     12.763 μs              ┊ GC (median):     0.00%
@@ -220,9 +231,10 @@ end
 #   11.9 μs         Histogram: frequency by time        24.5 μs <
 
 #  Memory estimate: 25.81 KiB, allocs estimate: 421.
+using SparseArrays: sparse
 function applyBC!(op::AbstractFEOperator)
     # apply Neumann BC
-    Bmat = spzeros(Float64, length(op.Neumann_BC), size(op.stiff, 2))
+    Bmat = @view op.stiff[end-length(op.Neumann_BC)+1:end,1:size(op.stiff,2)]
     for i=eachindex(op.Neumann_BC)
         off = (op.Neumann_BC[i].comp-1)*op.mesh.numBasis
         cdof_neu = findall(op.mesh.controlPoints[1,:].==op.Neumann_BC[i].x_val)
@@ -272,7 +284,7 @@ function applyBC!(op::AbstractFEOperator)
     op.jacob[1:size(Bmat,2),end-size(Bmat,1)+1:end] .= Bmat'
     # apply Dirichlet BC
     for i=eachindex(op.Dirichlet_BC)
-        bcdof = Array{Int64,1}(undef, 0)
+        bcdof = Array{Int16,1}(undef, 0)
         bcdof = vcat(bcdof, findall(op.mesh.controlPoints[1,:].==op.Dirichlet_BC[i].x_val))
         for j ∈ op.Dirichlet_BC[i].comp
             bcdof .+= (j-1)*op.mesh.numBasis
@@ -296,8 +308,6 @@ Integrate the (consistant) global mass matrix over the mesh, given a density.
 """
 function global_mass!(mass, mesh::Mesh, ρ, gauss_rule)
     B, dB = bernsteinBasis(gauss_rule.nodes, mesh.degP[1])
-    domainLength = 0
-    # mass = spzeros(Float64, mesh.numBasis, mesh.numBasis)
     for iElem = 1:mesh.numElem
         uMin = mesh.elemVertex[iElem, 1]
         uMax = mesh.elemVertex[iElem, 2]
@@ -328,13 +338,9 @@ function global_mass!(mass, mesh::Mesh, ρ, gauss_rule)
             RR /= w_sum
             phys_pt = RR' * cpts
             localMass += Jac_par_phys * Jac_ref_par * ρ(phys_pt) * (RR*RR') * gauss_rule.weights[iGauss]
-            domainLength += Jac_par_phys * Jac_ref_par * gauss_rule.weights[iGauss]
         end
-        #@show localMass
-        #readline(stdin)
         mass[curNodes, curNodes] += localMass
         mass[curNodes.+mesh.numBasis, curNodes.+mesh.numBasis] += localMass
     end
-    # @show domainLength
-    return mass
+    return nothing
 end

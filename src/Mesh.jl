@@ -1,14 +1,18 @@
 # mesh module
-mutable struct Mesh
-    elemVertex::Array{Float64,2}
-    elemNode::Array{Array{Int64,1},1}
-    degP::Array{Int64,1}
-    C::Array{Array{Float64,2},1}
-    numBasis::Int64
-    numElem::Int64
-    controlPoints::Array{Float64, 2}
-    weights::Array{Float64, 1}
-    knots :: Array{Float64,1}
+mutable struct Mesh{T}
+    elemVertex    :: Array{T,2}
+    elemNode      :: Array{Array{Int16,1},1}
+    degP          :: Array{Int16,1}
+    C             :: Array{Array{T,2},1}
+    numBasis      :: Int16
+    numElem       :: Int16
+    controlPoints :: Array{T, 2}
+    weights       :: Array{T, 1}
+    knots         :: Array{T,1}
+    function Mesh(elemVertex::Array{T,2}, elemNode, degP, C::Array{Array{T,2},1}, numBasis, numElem,
+                  controlPoints::Array{T,2}, weights::Array{T,1}, knots::Array{T,1}) where T
+        new{T}(elemVertex, elemNode, degP, C, numBasis, numElem, controlPoints, weights, knots)
+    end
 end
 
 function Mesh1D(ptLeft, ptRight, numElem, degP)
@@ -34,12 +38,11 @@ OUTPUT: IEN - array with nb rows and p+1 columns, where each row indicates the
         the left and right knot of a non-empty knot-span
 """
 function makeIEN(knotVector, numElem, p)
-    IEN  = zeros(Int64, numElem, p+1)
-    tolEq = 1e-10
+    IEN  = zeros(Int16, numElem, p+1)
     elemVertex = zeros(numElem, 2)
     elementCounter = 0
     for indexKnot = 1:length(knotVector)-1
-        if knotVector[indexKnot+1]>knotVector[indexKnot]+tolEq
+        if knotVector[indexKnot+1]>knotVector[indexKnot]+eps(eltype(knotVector))
             elementCounter += 1
             IEN[elementCounter,:] = indexKnot-p:indexKnot
             elemVertex[elementCounter, :] = [knotVector[indexKnot], knotVector[indexKnot+1]]

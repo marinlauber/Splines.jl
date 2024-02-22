@@ -24,7 +24,7 @@ include("Operator.jl")
 export AbstractFEOperator,StaticFEOperator,DynamicFEOperator,integrate!,applyBC!
 
 include("Solver.jl")
-export NLsolve,LineSearches,ImplicitAD,GeneralizedAlpha,relaxation!
+export NLsolve,LineSearches,ImplicitAD,GeneralizedAlpha,Newmark
 export lsolve!,nlsolve!,solve_step!,global_mass!,residual!,jacobian!
 
 include("utils.jl")

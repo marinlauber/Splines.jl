@@ -1,7 +1,10 @@
 using FastGaussQuadrature
-struct GaussQuad
-    nodes::Array{Float64,1}
-    weights::Array{Float64,1}
+struct GaussQuad{T}
+    nodes   :: Array{T,1}
+    weights :: Array{T,1}
+    function GaussQuad(nodes::Array{T,1}, weights::Array{T,1}) where T
+        new{T}(nodes, weights)
+    end
 end
 
 """

@@ -1,9 +1,12 @@
 # Spline utils
-struct NURBS
-    number::Array{Int64,1}
-    coefs::Array{Float64}
-    knots::Array{Array{Float64,1}}
-    order::Array{Int64,1}
+struct NURBS{T}
+    number :: Array{Int16,1}
+    coefs  :: Array{T}
+    knots  :: Array{Array{T,1}}
+    order  :: Array{Int16,1}
+    function NURBS(number, coefs::Array{T}, knots::Array{Array{T,1}}, order) where T
+        new{T}(number, coefs, knots, order)
+    end
 end
 
 function nrbmak(coefs, knots)
@@ -28,7 +31,7 @@ function nrbmak(coefs, knots)
     return nrb
 end
 
-function findspan(n::Int64, u, knot::Array{Float64,1})
+function findspan(n, u, knot::Array)
     if (minimum(u)<knot[1]) || (maximum(u)>knot[end])
         error("Some value is outside the knot span")
     end
@@ -325,7 +328,7 @@ function bspdegelev(d, c, k, t)
     return ic, ik
 end
 
-function nrbdegelev(nurbs::NURBS, ntimes::Array{Int,1})
+function nrbdegelev(nurbs::NURBS, ntimes::Array)
     degree = nurbs.order .- 1
     knots = Array{Array}(undef, length(nurbs.knots))
     # NURBS represents a curve

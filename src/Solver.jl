@@ -3,78 +3,12 @@ using ImplicitAD
 using LineSearches
 using StaticArrays
 
-# struct GeneralizedAlpha
-#     op :: StaticFEOperator
-#     u ::Union{AbstractVector,Tuple{Vararg{AbstractVector}}}
-#     αm :: Float64
-#     αf :: Float64
-#     β :: Float64
-#     γ :: Float64
-#     Δt :: Vector{Float64}
-#     function GeneralizedAlpha(opr::StaticFEOperator; ρ∞=1.0)
-#         αm = (2.0 - ρ∞)/(ρ∞ + 1.0);
-#         αf = 1.0/(1.0 + ρ∞)
-#         γ = 0.5 - αf + αm;
-#         β = 0.25*(1.0 - αf + αm)^2;
-#         new(opr,(zero(opr.resid),zero(opr.resid),zero(opr.resid)),αm,αf,β,γ,[0.0])
-#     end
-# end
+"""
+    lsolve(op::AbstractFEOperator)
 
-# """
-#     solve_step!(solver::GeneralizedAlpha,force::AbstractArray,Δt::Float64)
-
-# steps a (potentially nonlinear) operator forward in time, given an external
-# force and a time step size.
-# """
-# function solve_step!(solver::GeneralizedAlpha, force, Δt)
-              
-#     # useful
-#     αf, αm, β, γ = solver.αf, solver.αm, solver.β, solver.γ
-
-#     # structural time steps
-#     tⁿ   = sum(solver.Δt[end])
-#     tⁿ⁺ᵅ = αf*(tⁿ+Δt) + (1.0-αf)*tⁿ;
-
-#     # predictor (initial guess) for the Newton-Raphson scheme
-#     (dⁿ⁺¹, vⁿ⁺¹, aⁿ⁺¹) = solver.u
-#     dⁿ=copy(dⁿ⁺¹); vⁿ=copy(vⁿ⁺¹); aⁿ=copy(aⁿ⁺¹);
-
-#     # Newton-Raphson iterations loop
-#     r₂ = 1.0; iter = 1;
-#     while r₂ > 1.0e-6 && iter < 1000
-
-#         # compute v_{n+1}, a_{n+1}, ... from "Isogeometric analysis: toward integration of CAD and FEA"
-#         vⁿ⁺¹ = γ/(β*Δt)*dⁿ⁺¹ - γ/(β*Δt)*dⁿ + (1.0-γ/β)*vⁿ - Δt*(γ/2β-1.0)*aⁿ;
-#         aⁿ⁺¹ = 1.0/(β*Δt^2)*dⁿ⁺¹ - 1.0/(β*Δt^2)*dⁿ - 1.0/(β*Δt)*vⁿ - (1.0/2β-1.0)*aⁿ;
-
-#         # compute d_{n+af}, v_{n+af}, a_{n+am}, ...
-#         dⁿ⁺ᵅ = αf*dⁿ⁺¹ + (1.0-αf)*dⁿ;
-#         vⁿ⁺ᵅ = αf*vⁿ⁺¹ + (1.0-αf)*vⁿ;
-#         aⁿ⁺ᵅ = αm*aⁿ⁺¹ + (1.0-αm)*aⁿ;
-
-#         # update the jacobian, the residual and the external force
-#         integrate!(solver.op, dⁿ⁺ᵅ, force)
-
-#         # compute the jacobian and the residuals
-#         solver.op.jacob .= αm/(β*Δt^2)*solver.op.mass .+ αf*solver.op.jacob
-#         solver.op.resid .= solver.op.stiff*dⁿ⁺ᵅ + solver.op.mass*aⁿ⁺ᵅ - solver.op.ext
-
-#         # apply BC
-#         applyBC!(solver.op)
-
-#         # check convergence
-#         r₂ = norm(solver.op.resid);
-#         if r₂ < 1.0e-6 && break; end
-
-#         # newton solve for the displacement increment
-#         dⁿ⁺¹ -= solver.op.jacob\solver.op.resid; iter += 1
-#     end
-#     # save variables
-#     solver.u[1] .= dⁿ⁺¹
-#     solver.u[2] .= vⁿ⁺¹
-#     solver.u[3] .= aⁿ⁺¹
-# end
-
+Solves the linearized system of equations for the operator `op` and returns the
+displacement increment.
+"""
 function lsolve!(op::AbstractFEOperator, force)
 
     # update the jacobian, the residual and the external force
@@ -91,6 +25,12 @@ function lsolve!(op::AbstractFEOperator, force)
     -op.jacob\op.resid
 end
 
+"""
+    nlsolve!(op::AbstractFEOperator)
+
+Solves the nonlinear system of equations for the operator `op` and returns the
+displacement increment.
+"""
 function nlsolve!(op::AbstractFEOperator, x, force)
     
     # unpack pre-allocated storage and the convergence flag
@@ -120,25 +60,16 @@ function nlsolve!(op::AbstractFEOperator, x, force)
     return x
 end
 
-
-####
-
-
-
 """
     solve_step!(solver::DynamicFEOpertor,force::AbstractArray,Δt::Float64)
 
-steps a (potentially nonlinear) operator forward in time, given an external
+Integrate a (potentially nonlinear) operator forward in time, given an external
 force and a time step size.
 """
-function solve_step!(op::DynamicFEOperator, force, Δt)
+function solve_step!(op::DynamicFEOperator{GeneralizedAlpha}, force, Δt; tol=1.0e-6, max_iter=1000)
               
     # useful
     αf, αm, β, γ = op.αf, op.αm, op.β, op.γ
-
-    # structural time steps
-    tⁿ   = sum(op.Δt[end])
-    tⁿ⁺ᵅ = αf*(tⁿ+Δt) + (1.0-αf)*tⁿ;
 
     # predictor (initial guess) for the Newton-Raphson scheme
     (dⁿ⁺¹, vⁿ⁺¹, aⁿ⁺¹) = op.u
@@ -146,7 +77,7 @@ function solve_step!(op::DynamicFEOperator, force, Δt)
 
     # Newton-Raphson iterations loop
     r₂ = 1.0; iter = 1;
-    while r₂ > 1.0e-6 && iter < 1000
+    while r₂ > tol && iter < max_iter
 
         # compute v_{n+1}, a_{n+1}, ... from "Isogeometric analysis: toward integration of CAD and FEA"
         vⁿ⁺¹ = γ/(β*Δt)*dⁿ⁺¹ - γ/(β*Δt)*dⁿ + (1.0-γ/β)*vⁿ - Δt*(γ/2β-1.0)*aⁿ;
@@ -169,7 +100,7 @@ function solve_step!(op::DynamicFEOperator, force, Δt)
 
         # check convergence
         r₂ = norm(op.resid);
-        if r₂ < 1.0e-6 && break; end
+        if r₂ < tol && break; end
 
         # newton solve for the displacement increment
         dⁿ⁺¹ -= op.jacob\op.resid; iter += 1
@@ -179,8 +110,60 @@ function solve_step!(op::DynamicFEOperator, force, Δt)
     op.u[2] .= vⁿ⁺¹
     op.u[3] .= aⁿ⁺¹
 end
+# @benchmark solve_step!(operator, f_ext, Δt)
+# BenchmarkTools.Trial: 88 samples with 1 evaluation.
+#  Range (min … max):  50.358 ms … 87.329 ms  ┊ GC (min … max): 6.94% … 8.70%
+#  Time  (median):     56.670 ms              ┊ GC (median):    7.67%
+#  Time  (mean ± σ):   56.888 ms ±  3.881 ms  ┊ GC (mean ± σ):  7.84% ± 0.99%
 
+#                              ▇▁▂██ ▁▁                          
+#   ▅▅▁▁▃▁▁▁▁▁▁▅▁▃▁▁▁▁▁▁▁▁▅▁▁█▆█████▆███▆▁▃▅▁▃▁▅▃▁▁▁▁▁▁▁▁▁▃▃▁▁▃ ▁
+#   50.4 ms         Histogram: frequency by time        62.5 ms <
 
+#  Memory estimate: 181.75 MiB, allocs estimate: 1520493.
+function solve_step!(op::DynamicFEOperator{Newmark}, force, Δt; tol=1.0e-6, max_iter=1000)
+              
+    # useful
+    β, γ = op.β, op.γ
+
+    # predictor (initial guess) for the Newton-Raphson scheme
+    (dⁿ⁺¹, vⁿ⁺¹, aⁿ⁺¹) = op.u
+
+    # predictor step
+    dⁿ⁺¹ += Δt*vⁿ⁺¹ + Δt^2/2*(1-2*β)*aⁿ⁺¹;
+    vⁿ⁺¹ += Δt*(1-γ)*aⁿ⁺¹;
+    aⁿ⁺¹ .= 0.0;
+
+    # Newton-Raphson iterations loop
+    r₂ = 1.0; iter = 1;
+    while r₂ > tol && iter < max_iter
+
+        # update the jacobian, the residual and the external force
+        integrate!(op, dⁿ⁺¹, force)
+
+        # compute the jacobian and the residuals
+        op.jacob .= 1.0/(β*Δt^2)*op.mass .+ op.jacob
+        op.resid .= op.stiff*dⁿ⁺¹ + op.mass*aⁿ⁺¹ - op.ext
+
+        # apply BC
+        applyBC!(op)
+
+        # check convergence
+        r₂ = norm(op.resid);
+        if r₂ < tol && break; end
+
+        # newton solve for the displacement increment
+        Δd = -op.jacob\op.resid; iter += 1
+        dⁿ⁺¹ += Δd
+        vⁿ⁺¹ += γ/(β*Δt)*Δd
+        aⁿ⁺¹ += 1.0/(β*Δt^2)*Δd
+    end
+    # save variables
+    op.u[1] .= dⁿ⁺¹
+    op.u[2] .= vⁿ⁺¹
+    op.u[3] .= aⁿ⁺¹
+end
+#@TODO: remove if not used
 function relaxation!(op::AbstractFEOperator, force, BC=[]; ρ::Function=i->1.0, Δt=0.01, N=10_000)
 
     mass = zero(op.stiff)
