@@ -33,15 +33,18 @@ struct StaticFEOperator{T,Vf<:AbstractArray{T},Mf<:AbstractArray{T}} <: Abstract
     Neumann_BC   :: Vector{Boundary1D}
     EI :: T
     EA :: T
+    ρ :: Union{Function,Nothing} # density as a function of curvilnear coordinate
+    g :: Union{Function,Nothing} # gravitational acceleration
     function StaticFEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC=[], Neumann_BC=[];
-                              ρ::Function=(x)->-1.0, f=Array, T=Float64)
+                              ρ=nothing, g=nothing,
+                              f=Array, T=Float64)
         # generate
         Nd = 2*mesh.numBasis+length(Neumann_BC); Ng = (Nd,Nd)
         x, r, q = zeros(T,Nd) |> f, zeros(T,Nd) |> f, zeros(T,Nd) |> f
         K, J, M = zeros(T,Ng) |> f, zeros(T,Ng) |> f, zeros(T,Ng) |> f
         # no mass if not provided
-        ρ(0.5)>0.0 ? global_mass!(M, mesh, ρ, gauss_rule) : M = 0.0
-        new{T,typeof(x),typeof(K)}(x,r,q,K,J,M,mesh,gauss_rule,Dirichlet_BC,Neumann_BC,EI,EA)
+        global_mass!(M, mesh, ρ, gauss_rule)
+        new{T,typeof(x),typeof(K)}(x,r,q,K,J,M,mesh,gauss_rule,Dirichlet_BC,Neumann_BC,EI,EA,ρ,g)
     end
 end
 """
@@ -84,8 +87,11 @@ struct DynamicFEOperator{I,T,Vf<:AbstractArray{T},Mf<:AbstractArray{T}} <: Abstr
     β :: T
     γ :: T
     Δt :: Vector{T}
+    ρ :: Union{Function,Nothing} # density as a function of curvilnear coordinate
+    g :: Union{Function,Nothing} # gravitational acceleration
     function DynamicFEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC=[], Neumann_BC=[]; 
-                               ρ::Function=(x)->-1.0, f=Array, ρ∞=1.0, T=Float64, I=GeneralizedAlpha)
+                               ρ::Function=(x)->-1.0,  ρ∞=1.0, g=nothing, 
+                               f=Array, T=Float64, I=GeneralizedAlpha)
         # time integration parameters
         αm = (2.0 - ρ∞)/(ρ∞ + 1.0);
         αf = 1.0/(1.0 + ρ∞)
@@ -96,9 +102,9 @@ struct DynamicFEOperator{I,T,Vf<:AbstractArray{T},Mf<:AbstractArray{T}} <: Abstr
         x, r, q = zeros(T,Nd) |> f, zeros(T,Nd) |> f, zeros(T,Nd) |> f
         K, J, M = zeros(T,Ng) |> f, zeros(T,Ng) |> f, zeros(T,Ng) |> f
         # can be made nicer
-        global_mass!(M, mesh, ρ, gauss_rule)
+        global_mass!(M, mesh, ρ, gauss_rule) #never changes between time steps
         new{I,T,typeof(x),typeof(K)}(x,r,q,K,J,M,mesh,gauss_rule,Dirichlet_BC,Neumann_BC,EI,EA,
-                                    (zero(r),zero(r),zero(r)),αm,αf,β,γ,[0.0])
+                                    (zero(r),zero(r),zero(r)),αm,αf,β,γ,[0.0],ρ,g)
     end
 end
 """
@@ -163,7 +169,6 @@ function integrate!(op::AbstractFEOperator, x0::Vector, fx)
     # precompute bernstein basis
     B, dB, ddB = bernsteinBasis(op.gauss_rule.nodes, op.mesh.degP[1])
     numGauss = length(op.gauss_rule.nodes)
-    domainLength = 0
     for iElem = 1:op.mesh.numElem
         uMin = op.mesh.elemVertex[iElem, 1]
         uMax = op.mesh.elemVertex[iElem, 2]
@@ -209,18 +214,62 @@ function integrate!(op::AbstractFEOperator, x0::Vector, fx)
             
             # only different entry of Jacobian
             op.jacob[curNodes.+off, curNodes.+off] += Jac_ref_par * Jac_par_phys * op.EA * (dw0dx^2) * (dR*dR') * op.gauss_rule.weights[iGauss]
-            # check if the domain is correct
-            domainLength += Jac_ref_par * Jac_par_phys * op.gauss_rule.weights[iGauss]
         end
     end
     # enforce symmetry K21 -> K12
     op.stiff[off+1:2off,1:off] .= op.stiff[1:off,off+1:2off]
     # form jacobian
     op.jacob .+= op.stiff
-    
-    # @show domainLength
+    # compute gravity loading
+    gravity!(op, op.g)
+end
+
+"""
+ Integrate the gravity force over the spline and adds it to the external loading
+"""
+gravity!(op::AbstractFEOperator,::Nothing) = nothing
+function gravity!(op::AbstractFEOperator,::Function)
+    off = op.mesh.numBasis
+    # precompute bernstein basis
+    B, dB, ddB = bernsteinBasis(op.gauss_rule.nodes, op.mesh.degP[1])
+    for iElem = 1:op.mesh.numElem
+        uMin = op.mesh.elemVertex[iElem, 1]
+        uMax = op.mesh.elemVertex[iElem, 2]
+        Jac_ref_par = (uMax-uMin)/2
+
+        #compute the (B-)spline basis functions and derivatives with Bezier extraction
+        N_mat = B * op.mesh.C[iElem]'
+        dN_mat = dB * op.mesh.C[iElem]'/Jac_ref_par
+        ddN_mat = ddB * op.mesh.C[iElem]'/Jac_ref_par^2
+
+        #compute the rational spline basis
+        curNodes = op.mesh.elemNode[iElem]
+
+        # integrate on element
+        for iGauss = 1:length(op.gauss_rule.nodes)
+            #compute the rational basis
+            RR = N_mat[iGauss,:].* op.mesh.weights[curNodes]
+            dR = dN_mat[iGauss,:].* op.mesh.weights[curNodes]
+            ddR = ddN_mat[iGauss,:].* op.mesh.weights[curNodes]
+            w_sum = sum(RR)
+            dw_xi = sum(dR)
+            dR = dR/w_sum - RR*dw_xi/w_sum^2
+
+            #compute the derivatives w.r.t to the physical space
+            dxdxi = dR' * op.mesh.controlPoints[1, curNodes]
+            Jac_par_phys = det(dxdxi)
+            RR /= w_sum
+            phys_pt = RR' * op.mesh.controlPoints[1, curNodes]
+
+            # gravity force at the physical point
+            op.ext[curNodes     ] += Jac_par_phys * Jac_ref_par * op.g(1,phys_pt)*op.ρ(phys_pt) * RR * op.gauss_rule.weights[iGauss]
+            op.ext[curNodes.+off] += Jac_par_phys * Jac_ref_par * op.g(2,phys_pt)*op.ρ(phys_pt) * RR * op.gauss_rule.weights[iGauss]
+        end
+    end
     return nothing
 end
+
+
 # BenchmarkTools.Trial: 10000 samples with 1 evaluation.
 #  Range (min … max):  11.909 μs …  4.296 ms  ┊ GC (min … max):  0.00% … 98.00%
 #  Time  (median):     12.763 μs              ┊ GC (median):     0.00%
@@ -233,8 +282,9 @@ end
 #  Memory estimate: 25.81 KiB, allocs estimate: 421.
 using SparseArrays: sparse
 function applyBC!(op::AbstractFEOperator)
-    # apply Neumann BC
+    # point to the part we modify
     Bmat = @view op.stiff[end-length(op.Neumann_BC)+1:end,1:size(op.stiff,2)]
+    # apply Neumann BC
     for i=eachindex(op.Neumann_BC)
         off = (op.Neumann_BC[i].comp-1)*op.mesh.numBasis
         cdof_neu = findall(op.mesh.controlPoints[1,:].==op.Neumann_BC[i].x_val)
@@ -244,7 +294,7 @@ function applyBC!(op::AbstractFEOperator)
                 # nodes = gauss_rule.nodes
                 nodes = [2*op.Neumann_BC[i].u_val-1] # map into parameter space
                 # compute the Bernstein basis functions and derivatives
-                B, dB, ddB = bernsteinBasis(nodes, op.mesh.degP[1])
+                B, dB, _ = bernsteinBasis(nodes, op.mesh.degP[1])
                 uMin = op.mesh.elemVertex[iElem, 1]
                 uMax = op.mesh.elemVertex[iElem, 2]
                 Jac_ref_par = (uMax-uMin)/2
@@ -255,19 +305,17 @@ function applyBC!(op::AbstractFEOperator)
 
                 #compute the rational spline basis
                 numNodes = length(curNodes)
-                cpts = op.mesh.controlPoints[1, curNodes]
-                wgts = op.mesh.weights[curNodes]
                 localLagrange = zeros(numNodes)
                 for iGauss = 1:length(nodes)
                     #compute the rational basis
-                    RR = N_mat[iGauss,:].* wgts
-                    dR = dN_mat[iGauss,:].* wgts
+                    RR = N_mat[iGauss,:].* op.mesh.weights[curNodes]
+                    dR = dN_mat[iGauss,:].* op.mesh.weights[curNodes]
                     w_sum = sum(RR)
                     dw_xi = sum(dR)
                     dR = dR/w_sum - RR*dw_xi/w_sum^2
 
                     #compute the Jacobian of the transformation from parameter to physical space
-                    dxdxi = dR' * cpts
+                    dxdxi = dR' * op.mesh.controlPoints[1, curNodes]
                     Jac_par_phys = det(dxdxi)
 
                     localLagrange += Jac_ref_par * Jac_par_phys * dR * op.gauss_rule.weights[iGauss]
@@ -288,7 +336,7 @@ function applyBC!(op::AbstractFEOperator)
         bcdof = vcat(bcdof, findall(op.mesh.controlPoints[1,:].==op.Dirichlet_BC[i].x_val))
         for j ∈ op.Dirichlet_BC[i].comp
             bcdof .+= (j-1)*op.mesh.numBasis
-            bcval = Array{Float64,1}(undef, 0)
+            bcval = Array{eltype(op.stiff),1}(undef, 0)
             bcval = vcat(bcval, op.Dirichlet_BC[i].op_val)
             op.resid .-= op.stiff[:,bcdof]*bcval
             op.resid[bcdof] .= bcval
@@ -306,7 +354,8 @@ end
 """
 Integrate the (consistant) global mass matrix over the mesh, given a density.
 """
-function global_mass!(mass, mesh::Mesh, ρ, gauss_rule)
+global_mass!(mass::AbstractArray{T}, mesh::Mesh{T}, ::Nothing, gauss_rule) where T = (mass = zero(T))
+function global_mass!(mass::AbstractArray{T}, mesh::Mesh{T}, ρ::Function, gauss_rule) where {T}
     B, dB = bernsteinBasis(gauss_rule.nodes, mesh.degP[1])
     for iElem = 1:mesh.numElem
         uMin = mesh.elemVertex[iElem, 1]
@@ -322,7 +371,7 @@ function global_mass!(mass, mesh::Mesh, ρ, gauss_rule)
         numNodes = length(curNodes)
         cpts = mesh.controlPoints[1, curNodes]
         wgts = mesh.weights[curNodes]
-        localMass = zeros(numNodes, numNodes)
+        localMass = zeros(T, numNodes, numNodes)
         for iGauss = 1:length(gauss_rule.nodes)
             #compute the rational basis
             RR = N_mat[iGauss,:].* wgts

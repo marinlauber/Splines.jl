@@ -1,18 +1,18 @@
 using LinearAlgebra
-function bernsteinBasis(u, deg)
+function bernsteinBasis(u::AbstractVector{T}, deg) where T
     """
     Function returns the values of  Bernstein basis of degree deg at points u
     Algorithm A1.3 in Piegl & Tiller
     xi is a 1D array
     """
     lenU = length(u)
-    B = zeros(lenU, deg+1)
-    B[:, 1] = ones(lenU)
-    u1 = ones(lenU) - u
-    u2 = ones(lenU) + u
+    B = zeros(T, lenU, deg+1)
+    B[:, 1] = ones(T, lenU)
+    u1 = ones(T, lenU) - u
+    u2 = ones(T, lenU) + u
 
     for j in 1:deg
-        saved = zeros(lenU)
+        saved = zeros(T, lenU)
         for k in 1:j
             temp = B[:,k]
             B[:,k] = saved + u1.*temp
@@ -23,10 +23,10 @@ function bernsteinBasis(u, deg)
     B = B./(2^deg)
 
     #calculate the 1st derivative of Bernstein polynomials
-    dB = zeros(lenU, deg)
-    dB[:,1] = ones(lenU)
+    dB = zeros(T, lenU, deg)
+    dB[:,1] = ones(T, lenU)
     for j in 1:deg-1
-        saved = zeros(lenU)
+        saved = zeros(T, lenU)
         for k in 0:j-1
             temp = dB[:,k+1]
             dB[:,k+1] = saved + u1.*temp
@@ -35,15 +35,15 @@ function bernsteinBasis(u, deg)
         dB[:,j+1] = saved
     end
     dB = dB./(2^deg)
-    dB = hcat(zeros(lenU,1), dB, zeros(lenU, 1))
+    dB = hcat(zeros(T, lenU,1), dB, zeros(T, lenU, 1))
     dB = (dB[:,1:end-1]-dB[:,2:end])*deg
 
     #calculate the 2nd derivative of Bernstein polynomials
     if deg>1
-        ddB = zeros(lenU, deg-1)
-        ddB[:,1] = ones(lenU)
+        ddB = zeros(T, lenU, deg-1)
+        ddB[:,1] = ones(T, lenU)
         for j=1:deg-2
-            saved = zeros(lenU)
+            saved = zeros(T, lenU)
             for k in 0:j-1
                 temp = ddB[:,k+1]
                 ddB[:,k+1] = saved + u1.*temp
@@ -52,17 +52,15 @@ function bernsteinBasis(u, deg)
             ddB[:,j+1] = saved
         end
         ddB = ddB./(2^deg)
-        ddB = hcat(zeros(lenU,2), ddB, zeros(lenU,2))
+        ddB = hcat(zeros(T, lenU,2), ddB, zeros(T, lenU,2))
         ddB = (ddB[:,1:end-2]-2*ddB[:,2:end-1]+ddB[:,3:end])*deg*(deg-1)
     else
-        ddB = zeros(lenU,deg+1)
+        ddB = zeros(T, lenU,deg+1)
     end
     return B, dB, ddB
-
-
 end
 
-function bezierExtraction(knot, deg)
+function bezierExtraction(knot::AbstractVector{T}, deg) where T
     """
     Bezier extraction
     Based on Algroithm 1, from Borden - Isogeometric finite element data
@@ -73,17 +71,17 @@ function bezierExtraction(knot, deg)
     b = a + 1;
     nb = 1;
     nb_final = length(unique(knot))-1
-    C = zeros(deg+1,deg+1,nb_final)
-    C[:,:,1] = Matrix{Float64}(I, deg+1, deg+1)
+    C = zeros(T, deg+1,deg+1,nb_final)
+    C[:,:,1] = Matrix{T}(I, deg+1, deg+1)
 
     while b<=m
-        C[:,:,nb+1] = Matrix{Float64}(I, deg+1, deg+1)
+        C[:,:,nb+1] = Matrix{T}(I, deg+1, deg+1)
         i = b
         while (b<=m) && (knot[b+1] == knot[b])
             b = b + 1
         end
         multiplicity = b - i + 1
-        alphas = zeros(deg-multiplicity)
+        alphas = zeros(T, deg-multiplicity)
         if multiplicity < deg
             numerator = knot[b] - knot[a]
             for j in deg:-1:multiplicity+1
