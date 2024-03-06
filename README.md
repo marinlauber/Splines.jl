@@ -1,4 +1,7 @@
-# Splines
+# Splines.jl
+
+[![CI](https://github.com/marinlauber/Splines.jl/workflows/CI/badge.svg?branch=master&event=push)](https://github.com/marinlauber/Splines.jl/actions)
+[![codecov](https://codecov.io/gh/marinlauber/Splines.jl/branch/master/graph/badge.svg?token=8XYFWKOUFN)](https://codecov.io/gh/marinlauber/Splines.jl)
 
 ###  Isogeometric Analysis of non-linear Euler-Bernoulli Beams
 
