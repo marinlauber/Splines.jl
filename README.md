@@ -1,7 +1,7 @@
 # Splines.jl
 
 [![CI](https://github.com/marinlauber/Splines.jl/workflows/CI/badge.svg?branch=master&event=push)](https://github.com/marinlauber/Splines.jl/actions)
-[![codecov](https://codecov.io/gh/marinlauber/Splines.jl/branch/master/graph/badge.svg?token=8XYFWKOUFN)](https://codecov.io/gh/marinlauber/Splines.jl)
+[![codecov](https://codecov.io/gh/marinlauber/Splines.jl/graph/badge.svg?token=AAMQJ7LDWW)](https://codecov.io/gh/marinlauber/Splines.jl)
 
 ###  Isogeometric Analysis of non-linear Euler-Bernoulli Beams
 
@@ -51,3 +51,6 @@ Development stage means that to use this package it is best to `dev` it
 ] dev https://github.com/marinlauber/Splines.jl
 ```
 
+### Coverage 
+
+![](https://codecov.io/gh/marinlauber/Splines.jl/graphs/sunburst.svg?token=AAMQJ7LDWW)
