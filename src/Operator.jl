@@ -104,7 +104,7 @@ struct DynamicFEOperator{I,T,Vf<:AbstractArray{T},Mf<:AbstractArray{T}} <: Abstr
         # can be made nicer
         global_mass!(M, mesh, ρ, gauss_rule) #never changes between time steps
         new{I,T,typeof(x),typeof(K)}(x,r,q,K,J,M,mesh,gauss_rule,Dirichlet_BC,Neumann_BC,EI,EA,
-                                    (zero(r),zero(r),zero(r)),αm,αf,β,γ,[0.0],ρ,g)
+                                      (zero(r),zero(r),zero(r)),αm,αf,β,γ,[0.0],ρ,g)
     end
 end
 """
@@ -145,7 +145,7 @@ function jacobian!(jacob, x, force, op::AbstractFEOperator)
 end
 
 """
-    integrate!(op::AbstractFEOperator, x0::Vector{Float64}, fx)
+    integrate!(op::AbstractFEOperator, x0::Vector{T}, fx)
 
 Integrate the operator `op` given an initial solution `x0` and an external force. 
 This performs the element-wise integration of the different term in the governing equations.
@@ -161,14 +161,11 @@ This performs the element-wise integration of the different term in the governin
 
 #  Memory estimate: 150.39 KiB, allocs estimate: 1160.
 function integrate!(op::AbstractFEOperator, x0::Vector, fx)
-    off = op.mesh.numBasis
-
     # reset
-    op.stiff .= 0.; op.jacob .= 0.; op.ext .= 0.0;
-
+    op.stiff .= 0.; op.jacob .= 0.; op.ext .= 0.;
+    off = op.mesh.numBasis
     # precompute bernstein basis
     B, dB, ddB = bernsteinBasis(op.gauss_rule.nodes, op.mesh.degP[1])
-    numGauss = length(op.gauss_rule.nodes)
     for iElem = 1:op.mesh.numElem
         uMin = op.mesh.elemVertex[iElem, 1]
         uMax = op.mesh.elemVertex[iElem, 2]
@@ -196,13 +193,15 @@ function integrate!(op::AbstractFEOperator, x0::Vector, fx)
             #compute the derivatives w.r.t to the physical space
             dxdxi = dR' * op.mesh.controlPoints[1, curNodes]
             Jac_par_phys = det(dxdxi)
+            RR /= w_sum
+            phys_pt = RR' * op.mesh.controlPoints[1, curNodes]
 
             # compute linearised terms using the current solution
             du0dx = dR' * x0[curNodes]
             dw0dx = dR' * x0[curNodes.+off]
 
             # external force at physical point fx{size{2,numElem*numGauss}]}
-            fi = fx[:,(iElem-1)*numGauss+iGauss]
+            fi = fx[:,(iElem-1)*length(op.gauss_rule.nodes)+iGauss]; gravity!(op, fi, phys_pt, op.g)
             op.ext[curNodes     ] += Jac_par_phys * Jac_ref_par * fi[1] * RR * op.gauss_rule.weights[iGauss]
             op.ext[curNodes.+off] += Jac_par_phys * Jac_ref_par * fi[2] * RR * op.gauss_rule.weights[iGauss]
 
@@ -220,10 +219,17 @@ function integrate!(op::AbstractFEOperator, x0::Vector, fx)
     op.stiff[off+1:2off,1:off] .= op.stiff[1:off,off+1:2off]
     # form jacobian
     op.jacob .+= op.stiff
-    # compute gravity loading
-    gravity!(op, op.g)
 end
 
+"""
+    gravity!
+
+Add gravity contribution to the external force vector
+"""
+gravity!(op::AbstractFEOperator,f_ext,ξ,::Nothing) = nothing
+gravity!(op::AbstractFEOperator,f_ext,ξ,::Function) = for i ∈ 1:2
+    f_ext[i] += op.g(i,ξ)*op.ρ(ξ)
+end
 """
  Integrate the gravity force over the spline and adds it to the external loading
 """
