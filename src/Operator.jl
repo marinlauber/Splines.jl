@@ -31,8 +31,8 @@ struct StaticFEOperator{T,Vf<:AbstractArray{T},Mf<:AbstractArray{T}} <: Abstract
     gauss_rule   :: GaussQuad
     Dirichlet_BC :: Vector{Boundary1D}
     Neumann_BC   :: Vector{Boundary1D}
-    EI :: T
-    EA :: T
+    EI :: Function
+    EA :: Function
     ρ :: Union{Function,Nothing} # density as a function of curvilnear coordinate
     g :: Union{Function,Nothing} # gravitational acceleration
     function StaticFEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC=[], Neumann_BC=[];
@@ -44,9 +44,11 @@ struct StaticFEOperator{T,Vf<:AbstractArray{T},Mf<:AbstractArray{T}} <: Abstract
         K, J, M = zeros(T,Ng) |> f, zeros(T,Ng) |> f, zeros(T,Ng) |> f
         # no mass if not provided
         global_mass!(M, mesh, ρ, gauss_rule)
-        new{T,typeof(x),typeof(K)}(x,r,q,K,J,M,mesh,gauss_rule,Dirichlet_BC,Neumann_BC,EI,EA,ρ,g)
+        new{T,typeof(x),typeof(K)}(x,r,q,K,J,M,mesh,gauss_rule,Dirichlet_BC,Neumann_BC,F2F(EI),F2F(EA),ρ,g)
     end
 end
+F2F(a::Function) = a
+F2F(a::Number) = (x)->a
 """
     DynamicFEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC=[], Neumann_BC=[]; 
                       ρ::Function=(x)->-1.0, f=Array, ρ∞=1.0, T=Float64, I=GeneralizedAlpha)
@@ -79,8 +81,8 @@ struct DynamicFEOperator{I,T,Vf<:AbstractArray{T},Mf<:AbstractArray{T}} <: Abstr
     gauss_rule :: GaussQuad
     Dirichlet_BC :: Vector{Boundary1D}
     Neumann_BC   :: Vector{Boundary1D}
-    EI :: T
-    EA :: T
+    EI :: Function
+    EA :: Function
     u ::Union{AbstractVector,Tuple{Vararg{AbstractVector}}}
     αm :: T
     αf :: T
@@ -103,10 +105,11 @@ struct DynamicFEOperator{I,T,Vf<:AbstractArray{T},Mf<:AbstractArray{T}} <: Abstr
         K, J, M = zeros(T,Ng) |> f, zeros(T,Ng) |> f, zeros(T,Ng) |> f
         # can be made nicer
         global_mass!(M, mesh, ρ, gauss_rule) #never changes between time steps
-        new{I,T,typeof(x),typeof(K)}(x,r,q,K,J,M,mesh,gauss_rule,Dirichlet_BC,Neumann_BC,EI,EA,
+        new{I,T,typeof(x),typeof(K)}(x,r,q,K,J,M,mesh,gauss_rule,Dirichlet_BC,Neumann_BC,F2F(EI),F2F(EA),
                                       (zero(r),zero(r),zero(r)),αm,αf,β,γ,[0.0],ρ,g)
     end
 end
+
 """
     residual(resid, x, force, op::AbstractFEOperator)
 
@@ -143,48 +146,48 @@ function jacobian!(jacob, x, force, op::AbstractFEOperator)
     jacob .= op.jacob
     return nothing
 end
-
+function Jξ(elemVertex::AbstractArray{T}, iElem::Int) where T
+    (elemVertex[iElem,2]-elemVertex[iElem,1])/T(2.0)
+end
+function BSplineBasis(mesh::Splines.Mesh{T}, iElem::Int) where T
+    Jac_ref_par = Jξ(mesh.elemVertex,iElem)
+    N_mat = mesh.B * mesh.C[iElem]
+    dN_mat = mesh.dB * mesh.C[iElem]/Jac_ref_par
+    ddN_mat = mesh.ddB * mesh.C[iElem]/Jac_ref_par^2
+    return Jac_ref_par,N_mat, dN_mat, ddN_mat
+end
+function BSplineBasis(B, dB, ddB, Cᵢ, Jac_ref_par)
+    N_mat = B * Cᵢ
+    dN_mat = dB * Cᵢ/Jac_ref_par
+    ddN_mat = ddB * Cᵢ/Jac_ref_par^2
+    return N_mat, dN_mat, ddN_mat
+end
 """
     integrate!(op::AbstractFEOperator, x0::Vector{T}, fx)
 
 Integrate the operator `op` given an initial solution `x0` and an external force. 
 This performs the element-wise integration of the different term in the governing equations.
 """
-# BenchmarkTools.Trial: 10000 samples with 1 evaluation.
-#  Range (min … max):  29.019 μs …  2.566 ms  ┊ GC (min … max):  0.00% … 97.31%
-#  Time  (median):     30.990 μs              ┊ GC (median):     0.00%
-#  Time  (mean ± σ):   37.714 μs ± 87.849 μs  ┊ GC (mean ± σ):  12.85% ±  5.44%
-
-#   ▃▆█▇▅▃▂▃▃▃▂▁                                                ▂
-#   █████████████▇▇▆▅▆▇▆▅▅▆▅▅▄▄▄▆▆▆▆▆▅▄▅▆▇█▇▆▆▆▆▅▄▅▇█▇▆▅▆▁▅▆██▇ █
-#   29 μs        Histogram: log(frequency) by time      68.9 μs <
-
-#  Memory estimate: 150.39 KiB, allocs estimate: 1160.
-function integrate!(op::AbstractFEOperator, x0::Vector, fx)
+function integrate!(op::AbstractFEOperator, x0::AbstractVector{T}, fx::AbstractArray{T}) where T
     # reset
     op.stiff .= 0.; op.jacob .= 0.; op.ext .= 0.;
     off = op.mesh.numBasis
-    # precompute bernstein basis
-    B, dB, ddB = bernsteinBasis(op.gauss_rule.nodes, op.mesh.degP[1])
+
+    # integrate on each element
     for iElem = 1:op.mesh.numElem
-        uMin = op.mesh.elemVertex[iElem, 1]
-        uMax = op.mesh.elemVertex[iElem, 2]
-        Jac_ref_par = (uMax-uMin)/2
-
-        #compute the (B-)spline basis functions and derivatives with Bezier extraction
-        N_mat = B * op.mesh.C[iElem]'
-        dN_mat = dB * op.mesh.C[iElem]'/Jac_ref_par
-        ddN_mat = ddB * op.mesh.C[iElem]'/Jac_ref_par^2
-
+        
+        # compute the (B-)spline basis functions and derivatives with Bezier extraction
+        Jac_ref_par,N,dN,ddN = BSplineBasis(op.mesh, iElem)
+        
         #compute the rational spline basis
         curNodes = op.mesh.elemNode[iElem]
-
+        
         # integrate on element
         for iGauss = 1:length(op.gauss_rule.nodes)
             #compute the rational basis
-            RR = N_mat[iGauss,:].* op.mesh.weights[curNodes]
-            dR = dN_mat[iGauss,:].* op.mesh.weights[curNodes]
-            ddR = ddN_mat[iGauss,:].* op.mesh.weights[curNodes]
+            RR = N[iGauss,:].* op.mesh.weights[curNodes]
+            dR = dN[iGauss,:].* op.mesh.weights[curNodes]
+            ddR = ddN[iGauss,:].* op.mesh.weights[curNodes]
             w_sum = sum(RR)
             dw_xi = sum(dR)
             dR = dR/w_sum - RR*dw_xi/w_sum^2
@@ -201,24 +204,54 @@ function integrate!(op::AbstractFEOperator, x0::Vector, fx)
             dw0dx = dR' * x0[curNodes.+off]
 
             # external force at physical point fx{size{2,numElem*numGauss}]}
-            fi = fx[:,(iElem-1)*length(op.gauss_rule.nodes)+iGauss]; gravity!(op, fi, phys_pt, op.g)
+            fi = fx[:,(iElem-1)*length(op.gauss_rule.nodes)+iGauss]; 
+            gravity!(op, fi, phys_pt, op.g)
             op.ext[curNodes     ] += Jac_par_phys * Jac_ref_par * fi[1] * RR * op.gauss_rule.weights[iGauss]
             op.ext[curNodes.+off] += Jac_par_phys * Jac_ref_par * fi[2] * RR * op.gauss_rule.weights[iGauss]
 
             # compute the different terms
-            op.stiff[curNodes, curNodes] += Jac_ref_par * Jac_par_phys * op.EA * (dR*dR') * op.gauss_rule.weights[iGauss]
-            op.stiff[curNodes, curNodes.+off] += 0.5 * Jac_ref_par * Jac_par_phys * op.EA * (dw0dx) * (dR*dR') * op.gauss_rule.weights[iGauss]
-            op.stiff[curNodes.+off, curNodes.+off] += Jac_ref_par * Jac_par_phys^2 * op.EI * (ddR*ddR') * op.gauss_rule.weights[iGauss]
-            op.stiff[curNodes.+off, curNodes.+off] += 0.5 * Jac_ref_par * Jac_par_phys * op.EA * (du0dx + dw0dx^2) * (dR*dR') * op.gauss_rule.weights[iGauss]
+            op.stiff[curNodes, curNodes] += Jac_ref_par * Jac_par_phys * op.EA(phys_pt) * (dR*dR') * op.gauss_rule.weights[iGauss]
+            op.stiff[curNodes, curNodes.+off] += 0.5 * Jac_ref_par * Jac_par_phys * op.EA(phys_pt) * (dw0dx) * (dR*dR') * op.gauss_rule.weights[iGauss]
+            op.stiff[curNodes.+off, curNodes.+off] += Jac_ref_par * Jac_par_phys^2 * op.EI(phys_pt) * (ddR*ddR') * op.gauss_rule.weights[iGauss]
+            op.stiff[curNodes.+off, curNodes.+off] += 0.5 * Jac_ref_par * Jac_par_phys * op.EA(phys_pt) * (du0dx + dw0dx^2) * (dR*dR') * op.gauss_rule.weights[iGauss]
             
             # only different entry of Jacobian
-            op.jacob[curNodes.+off, curNodes.+off] += Jac_ref_par * Jac_par_phys * op.EA * (dw0dx^2) * (dR*dR') * op.gauss_rule.weights[iGauss]
+            op.jacob[curNodes.+off, curNodes.+off] += Jac_ref_par * Jac_par_phys * op.EA(phys_pt) * (dw0dx^2) * (dR*dR') * op.gauss_rule.weights[iGauss]
         end
     end
     # enforce symmetry K21 -> K12
     op.stiff[off+1:2off,1:off] .= op.stiff[1:off,off+1:2off]
     # form jacobian
-    op.jacob .+= op.stiff
+    op.jacob .+= op.stiff;
+end
+
+function integrate_fast!(op::AbstractFEOperator, x0::AbstractVector{T}, fx::AbstractArray{T}) where T
+    # reset
+    op.stiff .= 0.; op.jacob .= 0.; op.ext .= 0.;
+    
+    # integrate on each element
+    for iElem ∈ 1:Nelem
+
+        # integrate first term
+        @integrate op.stiff[I] = op.EA(phys_pt(I)) * (dR(I)*dR(I)') over I in element(op.mesh,iElem)
+    end
+end
+
+# dR(I) = RR = N[iGauss,:].* op.mesh.weights[I]
+# dR = dN[iGauss,:].* op.mesh.weights[curNodes]
+# w_sum = sum(RR)
+# dw_xi = sum(dR)
+# dR = dR/w_sum - RR*dw_xi/w_sum^2
+
+# given an element ID, return the CI of the stiffness matrix
+element(m,iElem::Int16) = CartesianIndices((m.elemNode[iElem],m.elemNode[iElem]))
+macro @integrate(ex)
+    # Make sure it's a single assignment
+    @assert ex.head == :(=) && ex.args[1].head == :(ref)
+    a,I = ex.args[1].args[1:2]
+    return quote # loop over the size of the reference
+        WaterLily.@loop $ex over $I ∈ inside($a)
+    end |> esc
 end
 
 """
@@ -231,61 +264,13 @@ gravity!(op::AbstractFEOperator,f_ext,ξ,::Function) = for i ∈ 1:2
     f_ext[i] += op.g(i,ξ)*op.ρ(ξ)
 end
 """
- Integrate the gravity force over the spline and adds it to the external loading
+    applyBC(op::AbstractFEOperator)
+
+Apply the boundary conditions to the operator `op`. This modifies the stiffness matrix,
+the residual and the Jacobian. The Neumann boundary conditions are applied using the
+Lagrange multiplier method, while the Dirichlet boundary conditions are applied using
+the penalty method.
 """
-gravity!(op::AbstractFEOperator,::Nothing) = nothing
-function gravity!(op::AbstractFEOperator,::Function)
-    off = op.mesh.numBasis
-    # precompute bernstein basis
-    B, dB, ddB = bernsteinBasis(op.gauss_rule.nodes, op.mesh.degP[1])
-    for iElem = 1:op.mesh.numElem
-        uMin = op.mesh.elemVertex[iElem, 1]
-        uMax = op.mesh.elemVertex[iElem, 2]
-        Jac_ref_par = (uMax-uMin)/2
-
-        #compute the (B-)spline basis functions and derivatives with Bezier extraction
-        N_mat = B * op.mesh.C[iElem]'
-        dN_mat = dB * op.mesh.C[iElem]'/Jac_ref_par
-        ddN_mat = ddB * op.mesh.C[iElem]'/Jac_ref_par^2
-
-        #compute the rational spline basis
-        curNodes = op.mesh.elemNode[iElem]
-
-        # integrate on element
-        for iGauss = 1:length(op.gauss_rule.nodes)
-            #compute the rational basis
-            RR = N_mat[iGauss,:].* op.mesh.weights[curNodes]
-            dR = dN_mat[iGauss,:].* op.mesh.weights[curNodes]
-            ddR = ddN_mat[iGauss,:].* op.mesh.weights[curNodes]
-            w_sum = sum(RR)
-            dw_xi = sum(dR)
-            dR = dR/w_sum - RR*dw_xi/w_sum^2
-
-            #compute the derivatives w.r.t to the physical space
-            dxdxi = dR' * op.mesh.controlPoints[1, curNodes]
-            Jac_par_phys = det(dxdxi)
-            RR /= w_sum
-            phys_pt = RR' * op.mesh.controlPoints[1, curNodes]
-
-            # gravity force at the physical point
-            op.ext[curNodes     ] += Jac_par_phys * Jac_ref_par * op.g(1,phys_pt)*op.ρ(phys_pt) * RR * op.gauss_rule.weights[iGauss]
-            op.ext[curNodes.+off] += Jac_par_phys * Jac_ref_par * op.g(2,phys_pt)*op.ρ(phys_pt) * RR * op.gauss_rule.weights[iGauss]
-        end
-    end
-    return nothing
-end
-
-
-# BenchmarkTools.Trial: 10000 samples with 1 evaluation.
-#  Range (min … max):  11.909 μs …  4.296 ms  ┊ GC (min … max):  0.00% … 98.00%
-#  Time  (median):     12.763 μs              ┊ GC (median):     0.00%
-#  Time  (mean ± σ):   15.591 μs ± 93.350 μs  ┊ GC (mean ± σ):  13.21% ±  2.20%
-
-#     █▇▂                                                        
-#   ▃████▆▄▃▃▃▄▄▄▃▃▃▃▃▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▁▂▂▂▂▂▂▂▂▂▂▂▂▂▂▁▂▁▂ ▃
-#   11.9 μs         Histogram: frequency by time        24.5 μs <
-
-#  Memory estimate: 25.81 KiB, allocs estimate: 421.
 using SparseArrays: sparse
 function applyBC!(op::AbstractFEOperator)
     # point to the part we modify
@@ -306,8 +291,8 @@ function applyBC!(op::AbstractFEOperator)
                 Jac_ref_par = (uMax-uMin)/2
 
                 #compute the (B-)spline basis functions and derivatives with Bezier extraction
-                N_mat = B * op.mesh.C[iElem]'
-                dN_mat = dB * op.mesh.C[iElem]'/Jac_ref_par
+                N_mat = B * op.mesh.C[iElem]
+                dN_mat = dB * op.mesh.C[iElem]/Jac_ref_par
 
                 #compute the rational spline basis
                 numNodes = length(curNodes)
@@ -358,6 +343,8 @@ function applyBC!(op::AbstractFEOperator)
 end
 
 """
+    global_mass!(mass::AbstractArray{T}, mesh::Mesh{T}, ρ::Union{Nothing,Function}, gauss_rule)
+
 Integrate the (consistant) global mass matrix over the mesh, given a density.
 """
 global_mass!(mass::AbstractArray{T}, mesh::Mesh{T}, ::Nothing, gauss_rule) where T = (mass = zero(T))
@@ -369,8 +356,8 @@ function global_mass!(mass::AbstractArray{T}, mesh::Mesh{T}, ρ::Function, gauss
         Jac_ref_par = (uMax-uMin)/2
 
         #compute the (B-)spline basis functions and derivatives with Bezier extraction
-        N_mat = B * mesh.C[iElem]'
-        dN_mat = dB * mesh.C[iElem]'/Jac_ref_par
+        N_mat = B * mesh.C[iElem]
+        dN_mat = dB * mesh.C[iElem]/Jac_ref_par
 
         #compute the rational spline basis
         curNodes = mesh.elemNode[iElem]
