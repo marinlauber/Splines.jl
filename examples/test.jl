@@ -1,7 +1,7 @@
 using Splines
 using Plots
 
-numElem=2;degP=3
+numElem=4;degP=3
 
 println("Testing on fixed-fixed beam with UDL:")
 println(" numElem: ", numElem)

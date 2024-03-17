@@ -172,19 +172,20 @@ function integrate!(op::AbstractFEOperator, x0::AbstractVector{T}, fx::AbstractA
     # reset
     op.stiff .= 0.; op.jacob .= 0.; op.ext .= 0.;
     off = op.mesh.numBasis
-
+    degP = op.mesh.degP[1]
     # integrate on each element
     for iElem = 1:op.mesh.numElem
         
         # compute the (B-)spline basis functions and derivatives with Bezier extraction
         Jac_ref_par,N,dN,ddN = BSplineBasis(op.mesh, iElem)
         
-        #compute the rational spline basis
-        curNodes = op.mesh.elemNode[iElem]
-        
+        # where are we in the stiffness matrix
+        I = element(iElem,degP)
+        curNodes = nodes(iElem,degP)
+
         # integrate on element
         for iGauss = 1:length(op.gauss_rule.nodes)
-            #compute the rational basis
+            #compute the rational basis, this all allpcates at leats one
             RR = N[iGauss,:].* op.mesh.weights[curNodes]
             dR = dN[iGauss,:].* op.mesh.weights[curNodes]
             ddR = ddN[iGauss,:].* op.mesh.weights[curNodes]
@@ -210,49 +211,69 @@ function integrate!(op::AbstractFEOperator, x0::AbstractVector{T}, fx::AbstractA
             op.ext[curNodes.+off] += Jac_par_phys * Jac_ref_par * fi[2] * RR * op.gauss_rule.weights[iGauss]
 
             # compute the different terms
-            op.stiff[curNodes, curNodes] += Jac_ref_par * Jac_par_phys * op.EA(phys_pt) * (dR*dR') * op.gauss_rule.weights[iGauss]
-            op.stiff[curNodes, curNodes.+off] += 0.5 * Jac_ref_par * Jac_par_phys * op.EA(phys_pt) * (dw0dx) * (dR*dR') * op.gauss_rule.weights[iGauss]
-            op.stiff[curNodes.+off, curNodes.+off] += Jac_ref_par * Jac_par_phys^2 * op.EI(phys_pt) * (ddR*ddR') * op.gauss_rule.weights[iGauss]
-            op.stiff[curNodes.+off, curNodes.+off] += 0.5 * Jac_ref_par * Jac_par_phys * op.EA(phys_pt) * (du0dx + dw0dx^2) * (dR*dR') * op.gauss_rule.weights[iGauss]
+            op.stiff[I] += Jac_ref_par * Jac_par_phys * op.EA(phys_pt) * (dR*dR') * op.gauss_rule.weights[iGauss]
+            op.stiff[I.+δ(0,off)] += 0.5 * Jac_ref_par * Jac_par_phys * op.EA(phys_pt) * (dw0dx) * (dR*dR') * op.gauss_rule.weights[iGauss]
+            op.stiff[I.+δ(off,off)] += Jac_ref_par * Jac_par_phys^2 * op.EI(phys_pt) * (ddR*ddR') * op.gauss_rule.weights[iGauss]
+            op.stiff[I.+δ(off,off)] += 0.5 * Jac_ref_par * Jac_par_phys * op.EA(phys_pt) * (du0dx + dw0dx^2) * (dR*dR') * op.gauss_rule.weights[iGauss]
             
             # only different entry of Jacobian
-            op.jacob[curNodes.+off, curNodes.+off] += Jac_ref_par * Jac_par_phys * op.EA(phys_pt) * (dw0dx^2) * (dR*dR') * op.gauss_rule.weights[iGauss]
+            op.jacob[I.+δ(off,off)] += Jac_ref_par * Jac_par_phys * op.EA(phys_pt) * (dw0dx^2) * (dR*dR') * op.gauss_rule.weights[iGauss]
         end
     end
     # enforce symmetry K21 -> K12
-    op.stiff[off+1:2off,1:off] .= op.stiff[1:off,off+1:2off]
+    I = symmetric(off)
+    op.stiff[I] .= op.stiff[symmetric(I)]
+    # @loop op.stiff[I] = op.stiff(symmetric(I)) over I in symmetric(off)
     # form jacobian
     op.jacob .+= op.stiff;
+    # @loop op.jacob[I] = op.stiff[I] over I in inside(op.jacob)
 end
 
-function integrate_fast!(op::AbstractFEOperator, x0::AbstractVector{T}, fx::AbstractArray{T}) where T
-    # reset
-    op.stiff .= 0.; op.jacob .= 0.; op.ext .= 0.;
-    
-    # integrate on each element
-    for iElem ∈ 1:Nelem
+# function integrate_fast!(op::AbstractFEOperator, x0::AbstractVector{T}, fx::AbstractArray{T}) where T
+#     # reset
+#     op.stiff .= 0.; op.jacob .= 0.; op.ext .= 0.;
+#     degP = op.mesh.degP[1]; off = op.mesh.numBasis
+#     # integrate on each element
+#     for iElem ∈ 1:Nelem
 
-        # integrate first term
-        @integrate op.stiff[I] = op.EA(phys_pt(I)) * (dR(I)*dR(I)') over I in element(op.mesh,iElem)
-    end
-end
+#         # compute the (B-)spline basis functions and derivatives with Bezier extraction
+#         Jξ,N,dN,ddN = BSplineBasis(op.mesh, iElem)
+        
+#         # integrate first term
+#         @integrate op.stiff[I] += op.EA(phys_pt(I))*(dR(nodes,N,dN,w,iElem,degP)*dR(nodes,N,dN,w,iElem,degP)) over I in element(iElem,degP)
+#         @integrate op.stiff[I+δ(off)] += op.EA(phys_pt) * (dw0dx) * (dR*dR') 
+#         @integrate op.stiff[I+δ(off,off)] += op.EI(phys_pt) * (ddR*ddR') * op.gauss_rule.weights[iGauss]
+#         @integrate op.stiff[I+δ(off,off)] += op.EA(phys_pt) * (du0dx + dw0dx^2) * (dR*dR') * op.gauss_rule.weights[iGauss]
+#     end
+# end
 
-# dR(I) = RR = N[iGauss,:].* op.mesh.weights[I]
-# dR = dN[iGauss,:].* op.mesh.weights[curNodes]
-# w_sum = sum(RR)
-# dw_xi = sum(dR)
-# dR = dR/w_sum - RR*dw_xi/w_sum^2
 
-# given an element ID, return the CI of the stiffness matrix
-element(m,iElem::Int16) = CartesianIndices((m.elemNode[iElem],m.elemNode[iElem]))
-macro @integrate(ex)
-    # Make sure it's a single assignment
-    @assert ex.head == :(=) && ex.args[1].head == :(ref)
-    a,I = ex.args[1].args[1:2]
-    return quote # loop over the size of the reference
-        WaterLily.@loop $ex over $I ∈ inside($a)
-    end |> esc
-end
+# function phys_pt(op,nodes,N,dN,w,iElem,degP)
+#     I = CartesianIndex(iElem:iElem+degP)
+#     for iGauss = 1:length(nodes)
+#         #compute the rational basis
+#         RR = N[iGauss,:] .* w[I]
+#         dR = dN[iGauss,:] .* w[I]
+#         w_sum = sum(RR)
+#         dw_xi = sum(dR)
+#         dR = dR/w_sum - RR*dw_xi/w_sum^2
+#         phys_pt = RR' * op.mesh.controlPoints[1, curNodes]
+#     end
+#     return phys_pt
+# end
+
+# function dR(nodes,N,dN,w,iElem,degP) where N
+#     I = CartesianIndex(iElem:iElem+degP)
+#     for iGauss = 1:length(nodes)
+#         #compute the rational basis
+#         RR = N[iGauss,:] .* w[I]
+#         dR = dN[iGauss,:] .* w[I]
+#         w_sum = sum(RR)
+#         dw_xi = sum(dR)
+#         dR = dR/w_sum - RR*dw_xi/w_sum^2
+#     end
+#     return dR[I]
+# end
 
 """
     gravity!
@@ -263,6 +284,7 @@ gravity!(op::AbstractFEOperator,f_ext,ξ,::Nothing) = nothing
 gravity!(op::AbstractFEOperator,f_ext,ξ,::Function) = for i ∈ 1:2
     f_ext[i] += op.g(i,ξ)*op.ρ(ξ)
 end
+using SparseArrays: sparse
 """
     applyBC(op::AbstractFEOperator)
 
@@ -271,7 +293,6 @@ the residual and the Jacobian. The Neumann boundary conditions are applied using
 Lagrange multiplier method, while the Dirichlet boundary conditions are applied using
 the penalty method.
 """
-using SparseArrays: sparse
 function applyBC!(op::AbstractFEOperator)
     # point to the part we modify
     Bmat = @view op.stiff[end-length(op.Neumann_BC)+1:end,1:size(op.stiff,2)]
