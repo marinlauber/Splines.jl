@@ -221,12 +221,12 @@ function integrate!(op::AbstractFEOperator, x0::AbstractVector{T}, fx::AbstractA
         end
     end
     # enforce symmetry K21 -> K12
-    I = symmetric(off)
-    op.stiff[I] .= op.stiff[symmetric(I)]
-    # @loop op.stiff[I] = op.stiff(symmetric(I)) over I in symmetric(off)
+    # I = symmetric(off)
+    # op.stiff[I] .= op.stiff[symmetric(I)]
+    @loop op.stiff[I] = op.stiff[symmetric(I)] over I in symmetric(off)
     # form jacobian
-    op.jacob .+= op.stiff;
-    # @loop op.jacob[I] = op.stiff[I] over I in inside(op.jacob)
+    # op.jacob .+= op.stiff;
+    @loop op.jacob[I] = op.stiff[I] over I in CartesianIndices(op.jacob)
 end
 
 # function integrate_fast!(op::AbstractFEOperator, x0::AbstractVector{T}, fx::AbstractArray{T}) where T

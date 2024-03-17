@@ -15,10 +15,11 @@ using KernelAbstractions: get_backend, @index, @kernel
 # point to the part of the stiffness matrix that is symmetric, i.e. the upper right or lower left submatrix
 @inline symmetric(off::Integer) = CartesianIndices((off+1:2off,1:off))
 @inline symmetric(I::CartesianIndices) = CartesianIndices((last(I.indices),first(I.indices)))
+@inline symmetric(I::CartesianIndex) = CartesianIndex(last(I.I),first(I.I))
 """
-integrate
+Stolen from WaterLily.jl
 """
-macro integrate(args...)
+macro loop(args...)
     ex,_,itr = args
     _,I,R = itr.args; sym = []
     grab!(sym,ex)     # get arguments and replace composites in `ex`
@@ -44,7 +45,7 @@ grab!(sym,ex::Symbol) = union!(sym,[ex])        # grab symbol name
 grab!(sym,ex) = nothing
 rep(ex) = ex
 rep(ex::Expr) = ex.head == :. ? Symbol(ex.args[2].value) : ex
-export element,@integrate
+export element,nodes,δ,symmetric,@loop
 
 include("bernstein.jl")
 export norm
