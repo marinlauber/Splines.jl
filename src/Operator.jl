@@ -146,9 +146,11 @@ function jacobian!(jacob, x, force, op::AbstractFEOperator)
     jacob .= op.jacob
     return nothing
 end
+
 function Jξ(elemVertex::AbstractArray{T}, iElem::Int) where T
     (elemVertex[iElem,2]-elemVertex[iElem,1])/T(2.0)
 end
+
 function BSplineBasis(mesh::Splines.Mesh{T}, iElem::Int) where T
     Jac_ref_par = Jξ(mesh.elemVertex,iElem)
     N_mat = mesh.B * mesh.C[iElem]
@@ -156,12 +158,18 @@ function BSplineBasis(mesh::Splines.Mesh{T}, iElem::Int) where T
     ddN_mat = mesh.ddB * mesh.C[iElem]/Jac_ref_par^2
     return Jac_ref_par,N_mat, dN_mat, ddN_mat
 end
-function BSplineBasis(B, dB, ddB, Cᵢ, Jac_ref_par)
-    N_mat = B * Cᵢ
-    dN_mat = dB * Cᵢ/Jac_ref_par
-    ddN_mat = ddB * Cᵢ/Jac_ref_par^2
-    return N_mat, dN_mat, ddN_mat
+
+# function BSplineBasis(B, dB, ddB, Cᵢ, Jac_ref_par)
+#     N_mat = B * Cᵢ
+#     dN_mat = dB * Cᵢ/Jac_ref_par
+#     ddN_mat = ddB * Cᵢ/Jac_ref_par^2
+#     return N_mat, dN_mat, ddN_mat
+# end
+
+function Jξ(I::CartesianIndex,deg)
+    knot = 0.25
 end
+
 """
     integrate!(op::AbstractFEOperator, x0::Vector{T}, fx)
 
@@ -181,34 +189,34 @@ function integrate!(op::AbstractFEOperator, x0::AbstractVector{T}, fx::AbstractA
         
         # where are we in the stiffness matrix
         I = element(iElem,degP)
-        curNodes = nodes(iElem,degP)
+        In = nodes(iElem,degP)
 
         # integrate on element
         for iGauss = 1:length(op.gauss_rule.nodes)
             #compute the rational basis, this all allpcates at leats one
-            RR = N[iGauss,:].* op.mesh.weights[curNodes]
-            dR = dN[iGauss,:].* op.mesh.weights[curNodes]
-            ddR = ddN[iGauss,:].* op.mesh.weights[curNodes]
+            RR = N[iGauss,:].* op.mesh.weights[In]
+            dR = dN[iGauss,:].* op.mesh.weights[In]
+            ddR = ddN[iGauss,:].* op.mesh.weights[In]
             w_sum = sum(RR)
             dw_xi = sum(dR)
             dR = dR/w_sum - RR*dw_xi/w_sum^2
             ddR = ddR/w_sum - 2*dR*dw_xi/w_sum^2 - RR*sum(ddR)/w_sum^2 + 2*RR*dw_xi^2/w_sum^3
 
             #compute the derivatives w.r.t to the physical space
-            dxdxi = dR' * op.mesh.controlPoints[1, curNodes]
+            dxdxi = dR' * op.mesh.controlPoints[1, In]
             Jac_par_phys = det(dxdxi)
             RR /= w_sum
-            phys_pt = RR' * op.mesh.controlPoints[1, curNodes]
+            phys_pt = RR' * op.mesh.controlPoints[1, In]
 
             # compute linearised terms using the current solution
-            du0dx = dR' * x0[curNodes]
-            dw0dx = dR' * x0[curNodes.+off]
+            du0dx = dR' * x0[In]
+            dw0dx = dR' * x0[In.+off]
 
             # external force at physical point fx{size{2,numElem*numGauss}]}
             fi = fx[:,(iElem-1)*length(op.gauss_rule.nodes)+iGauss]; 
             gravity!(op, fi, phys_pt, op.g)
-            op.ext[curNodes     ] += Jac_par_phys * Jac_ref_par * fi[1] * RR * op.gauss_rule.weights[iGauss]
-            op.ext[curNodes.+off] += Jac_par_phys * Jac_ref_par * fi[2] * RR * op.gauss_rule.weights[iGauss]
+            op.ext[In     ] += Jac_par_phys * Jac_ref_par * fi[1] * RR * op.gauss_rule.weights[iGauss]
+            op.ext[In.+off] += Jac_par_phys * Jac_ref_par * fi[2] * RR * op.gauss_rule.weights[iGauss]
 
             # compute the different terms
             op.stiff[I] += Jac_ref_par * Jac_par_phys * op.EA(phys_pt) * (dR*dR') * op.gauss_rule.weights[iGauss]
