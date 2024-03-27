@@ -163,6 +163,18 @@ function plotSol(mesh::Mesh, sol0, exactSol::Function)
     display(graph)
 end
 
+function Jξ(elemVertex::AbstractArray{T}, iElem::Int) where T
+    (elemVertex[iElem,2]-elemVertex[iElem,1])/T(2.0)
+end
+
+function BSplineBasis(mesh::Mesh{T}, iElem::Int) where T
+    Jac_ref_par = Jξ(mesh.elemVertex,iElem)
+    N_mat = mesh.B * mesh.C[iElem]
+    dN_mat = mesh.dB * mesh.C[iElem]/Jac_ref_par
+    ddN_mat = mesh.ddB * mesh.C[iElem]/Jac_ref_par^2
+    return Jac_ref_par,N_mat, dN_mat, ddN_mat
+end
+
 
 """
 Plots the error in the approximate solution

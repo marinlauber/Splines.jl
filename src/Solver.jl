@@ -110,17 +110,7 @@ function solve_step!(op::DynamicFEOperator{GeneralizedAlpha}, force, Δt; tol=1.
     op.u[2] .= vⁿ⁺¹
     op.u[3] .= aⁿ⁺¹
 end
-# @benchmark solve_step!(operator, f_ext, Δt)
-# BenchmarkTools.Trial: 88 samples with 1 evaluation.
-#  Range (min … max):  50.358 ms … 87.329 ms  ┊ GC (min … max): 6.94% … 8.70%
-#  Time  (median):     56.670 ms              ┊ GC (median):    7.67%
-#  Time  (mean ± σ):   56.888 ms ±  3.881 ms  ┊ GC (mean ± σ):  7.84% ± 0.99%
 
-#                              ▇▁▂██ ▁▁                          
-#   ▅▅▁▁▃▁▁▁▁▁▁▅▁▃▁▁▁▁▁▁▁▁▅▁▁█▆█████▆███▆▁▃▅▁▃▁▅▃▁▁▁▁▁▁▁▁▁▃▃▁▁▃ ▁
-#   50.4 ms         Histogram: frequency by time        62.5 ms <
-
-#  Memory estimate: 181.75 MiB, allocs estimate: 1520493.
 function solve_step!(op::DynamicFEOperator{Newmark}, force, Δt; tol=1.0e-6, max_iter=1000)
               
     # useful
@@ -162,40 +152,4 @@ function solve_step!(op::DynamicFEOperator{Newmark}, force, Δt; tol=1.0e-6, max
     op.u[1] .= dⁿ⁺¹
     op.u[2] .= vⁿ⁺¹
     op.u[3] .= aⁿ⁺¹
-end
-#@TODO: remove if not used
-function relaxation!(op::AbstractFEOperator, force, BC=[]; ρ::Function=i->1.0, Δt=0.01, N=10_000)
-
-    mass = zero(op.stiff)
-    global_mass!(mass, op.mesh, ρ, op.gauss_rule)
-    for i ∈ BC
-        mass[:,i] .= 0.
-        mass[i,:] .= 0.
-        mass[i,i] = 1.0
-    end
-    v = zero(op.x)
-    accel = zero(op.x)
-    for it ∈ 1:N
-        
-        integrate!(op, op.x, force)
-        # get force delta
-        op.resid .= op.stiff*op.x - op.ext
-        # apply BC on the acceleration
-        op.resid[BC] .= 0.0
-
-        # compute acceleration
-        accel .= op.mass\op.resid
-        
-        # velocity relaxed
-        v .= 0.99*v .+ accel*Δt;
-        
-        # Update Positions
-        delta_u = (v.*Δt)./2;
-        delta_u[BC] .= 0.0
-
-        #Total displacements
-        op.x .+= delta_u
-        norm(delta_u)<√eps() && break
-    end
-    return op.x
 end

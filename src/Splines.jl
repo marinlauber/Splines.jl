@@ -7,15 +7,18 @@ export Plots
 export @unpack
 
 using KernelAbstractions: get_backend, @index, @kernel
+export @kernel,@index,get_backend
 
 # given an element ID, return the CI of the stiffness matrix
-@inline element(iElem::Integer,degP::Integer) = CartesianIndices((iElem:iElem+degP,iElem:iElem+degP))
-@inline nodes(iElem::Integer,degP::Integer) = iElem:iElem+degP
+@inline element(i::Integer,d::Integer) = CartesianIndices((i:i+d,i:i+d))
+@inline nodes(i::Integer,d::Integer) = i:i+d
 @inline δ(i=0,j=0) = CartesianIndex(i,j)
 # point to the part of the stiffness matrix that is symmetric, i.e. the upper right or lower left submatrix
-@inline symmetric(off::Integer) = CartesianIndices((off+1:2off,1:off))
+@inline symmetric(i::Integer) = CartesianIndices((i+1:2i,1:i))
 @inline symmetric(I::CartesianIndices) = CartesianIndices((last(I.indices),first(I.indices)))
 @inline symmetric(I::CartesianIndex) = CartesianIndex(last(I.I),first(I.I))
+# Neumman boundary condition part of the stiffness
+@inline Neumann(A,n) = CartesianIndices((2n+1:size(A,1),1:size(A,2)))
 """
 Stolen from WaterLily.jl
 """
@@ -45,7 +48,7 @@ grab!(sym,ex::Symbol) = union!(sym,[ex])        # grab symbol name
 grab!(sym,ex) = nothing
 rep(ex) = ex
 rep(ex::Expr) = ex.head == :. ? Symbol(ex.args[2].value) : ex
-export element,nodes,δ,symmetric,@loop
+export element,nodes,δ,symmetric,@loop,Neumann
 
 include("bernstein.jl")
 export norm
