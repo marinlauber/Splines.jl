@@ -1,27 +1,35 @@
 # mesh module
 mutable struct Mesh{T}
-    elemVertex    :: Array{T,2}
-    elemNode      :: Array{Array{Int16,1},1}
-    degP          :: Array{Int16,1}
-    C             :: Array{Array{T,2},1}
+    elemVertex    :: AbstractArray{T,2}
+    elemNode      :: AbstractVector{UnitRange{Int64}}
+    degP          :: AbstractArray{Int16,1}
+    C             :: AbstractArray{AbstractArray{T},1}
+    B             :: AbstractArray{T}
+    dB            :: AbstractArray{T}
+    ddB           :: AbstractArray{T}
+    N             :: AbstractArray{AbstractArray{T},1}
+    dN            :: AbstractArray{AbstractArray{T},1}
+    ddN           :: AbstractArray{AbstractArray{T},1}
+    Jac           :: AbstractArray{T,1}
     numBasis      :: Int16
     numElem       :: Int16
-    controlPoints :: Array{T, 2}
-    weights       :: Array{T, 1}
-    knots         :: Array{T,1}
-    function Mesh(elemVertex::Array{T,2}, elemNode, degP, C::Array{Array{T,2},1}, numBasis, numElem,
-                  controlPoints::Array{T,2}, weights::Array{T,1}, knots::Array{T,1}) where T
-        new{T}(elemVertex, elemNode, degP, C, numBasis, numElem, controlPoints, weights, knots)
+    controlPoints :: AbstractArray{T,2}
+    weights       :: AbstractArray{T,1}
+    knots         :: AbstractArray{T,1}
+    function Mesh(elemVertex::AbstractArray{T,2}, elemNode, degP, C, B, dB, ddB, N, dN, ddN, Jac, numBasis, numElem,
+                  controlPoints::AbstractArray{T,2}, weights::AbstractArray{T,1}, knots::AbstractArray{T,1}) where T
+        new{T}(elemVertex, elemNode, degP, C, B, dB, ddB, N, dN, ddN, Jac, 
+               numBasis, numElem, controlPoints, weights, knots)
     end
 end
 
 function Mesh1D(ptLeft, ptRight, numElem, degP)
+    gauss_rule = genGaussLegendre(degP+1)
     nrb = nrbline(ptLeft, ptRight)
     new_knots = collect(LinRange(0, 1, numElem+1)[2:end-1])
     nrb = nrbdegelev(nrb, [degP-1])
     nrb = nrbkntins(nrb, [new_knots])
-    IGAmesh = genMesh(nrb)
-    gauss_rule = genGaussLegendre(degP+1)
+    IGAmesh = genMesh(nrb, gauss_rule)
     return IGAmesh, gauss_rule
 end
 
@@ -38,13 +46,13 @@ OUTPUT: IEN - array with nb rows and p+1 columns, where each row indicates the
         the left and right knot of a non-empty knot-span
 """
 function makeIEN(knotVector, numElem, p)
-    IEN  = zeros(Int16, numElem, p+1)
+    IEN  = Vector{UnitRange{Int16}}(undef,numElem)
     elemVertex = zeros(numElem, 2)
     elementCounter = 0
     for indexKnot = 1:length(knotVector)-1
         if knotVector[indexKnot+1]>knotVector[indexKnot]+eps(eltype(knotVector))
             elementCounter += 1
-            IEN[elementCounter,:] = indexKnot-p:indexKnot
+            IEN[elementCounter] = indexKnot-p:indexKnot
             elemVertex[elementCounter, :] = [knotVector[indexKnot], knotVector[indexKnot+1]]
         end
     end
@@ -55,14 +63,14 @@ end
 """
 Initializes an IGA mesh from a NURBS object
 """
-function genMesh(nurbs::NURBS)
+function genMesh(nurbs::NURBS{T}, gauss_rule) where T
     #1D mesh
     knotU = nurbs.knots[1]
     degP = nurbs.order.-1
     Cmat, numElem = bezierExtraction(knotU, degP[1])
-    C = Array{Array{Float64,2},1}(undef, numElem)
+    C = Array{AbstractArray{T},1}(undef,numElem)
     for i=1:numElem
-        C[i] = Cmat[:,:,i]
+        C[i] = SArray{Tuple{degP[1]+1,degP[1]+1}}(Cmat[:,:,i]')
     end
     numBasis = length(knotU) - degP[1] - 1
     IEN, elemVertex = makeIEN(knotU, numElem, degP[1])
@@ -71,11 +79,22 @@ function genMesh(nurbs::NURBS)
     for i=1:3
         cpts[i,:] ./= wgts
     end
-    elemNode = Array{Array{Int64,1},1}(undef, numElem)
-    for i=1:numElem
-        elemNode[i]=IEN[i,:]
+    # elemNode = Array{Array{Int64,1},1}(undef, numElem)
+    # for i=1:numElem
+    #     elemNode[i]=IEN[i,:]
+    # end
+    B,dB,ddB = bernsteinBasis(gauss_rule.nodes, degP[1])
+    N = Array{AbstractArray{T},1}(undef,numElem)
+    dN = Array{AbstractArray{T},1}(undef,numElem)
+    ddN = Array{AbstractArray{T},1}(undef,numElem)
+    Jac = zeros(numElem)
+    for iElem = 1:numElem
+        Jac[iElem] = (elemVertex[iElem,2]-elemVertex[iElem,1])/T(2.0)
+        N[iElem], dN[iElem], ddN[iElem] = B*C[iElem], dB*C[iElem]/Jac[iElem], ddB*C[iElem]/Jac[iElem]^2
     end
-    IGAmesh = Mesh(elemVertex, elemNode, degP, C, numBasis, numElem, cpts, wgts, knotU)
+    elemVertex = SArray{Tuple{numElem,2}}(elemVertex)
+    
+    IGAmesh = Mesh(elemVertex, IEN, degP, C, B, dB, ddB, N, dN, ddN, Jac, numBasis, numElem, cpts, wgts, knotU)
     return IGAmesh
 end
 """
@@ -122,7 +141,7 @@ function plotSol(mesh::Mesh, sol0, exactSol::Function)
         uMax = mesh.elemVertex[iElem, 2]
         plotPts = LinRange(uMin, uMax, numPtsElem)
         physPts = zeros(numPtsElem)
-        splineVal = B*(mesh.C[iElem])'
+        splineVal = B*(mesh.C[iElem])
         cpts = mesh.controlPoints[1, curNodes]
         wgts = mesh.weights[curNodes]
         basisVal = zero(splineVal)
@@ -144,6 +163,18 @@ function plotSol(mesh::Mesh, sol0, exactSol::Function)
     display(graph)
 end
 
+function Jξ(elemVertex::AbstractArray{T}, iElem::Int) where T
+    (elemVertex[iElem,2]-elemVertex[iElem,1])/T(2.0)
+end
+
+function BSplineBasis(mesh::Mesh{T}, iElem::Int) where T
+    Jac_ref_par = Jξ(mesh.elemVertex,iElem)
+    N_mat = mesh.B * mesh.C[iElem]
+    dN_mat = mesh.dB * mesh.C[iElem]/Jac_ref_par
+    ddN_mat = mesh.ddB * mesh.C[iElem]/Jac_ref_par^2
+    return Jac_ref_par,N_mat, dN_mat, ddN_mat
+end
+
 
 """
 Plots the error in the approximate solution
@@ -160,7 +191,7 @@ function plotSolError(mesh::Mesh, sol0, exactSol::Function)
         uMax = mesh.elemVertex[iElem, 2]
         plotPts = LinRange(uMin, uMax, numPtsElem)
         physPts = zeros(numPtsElem)
-        splineVal = B*(mesh.C[iElem])'
+        splineVal = B*(mesh.C[iElem])
         cpts = mesh.controlPoints[1, curNodes]
         wgts = mesh.weights[curNodes]
         basisVal = zero(splineVal)
@@ -180,8 +211,8 @@ function plotSolError(mesh::Mesh, sol0, exactSol::Function)
     end
     display(graph)
 end
-function getDerivSol(mesh::Mesh, sol0)
-    numPtsElem = 4
+function getDerivSol(mesh::Mesh, sol0,numPts=mesh.numElem)
+    numPtsElem = max(floor(Int, numPts/mesh.numElem)+1,2)
     evalPts = LinRange(-1, 1, numPtsElem)
     B, dB, ddB = bernsteinBasis(evalPts, mesh.degP[1])
     sol = zeros((numPtsElem-1)*mesh.numElem+1)
@@ -191,8 +222,8 @@ function getDerivSol(mesh::Mesh, sol0)
         uMax = mesh.elemVertex[iElem, 2]
         Jac_ref_par = (uMax-uMin)/2
         curNodes = mesh.elemNode[iElem]
-        N_mat = B*(mesh.C[iElem])'
-        dN_mat = dB * mesh.C[iElem]'/Jac_ref_par
+        N_mat = B*(mesh.C[iElem])
+        dN_mat = dB * mesh.C[iElem]/Jac_ref_par
         wgts = mesh.weights[curNodes]
         solVal = zeros(numPtsElem)
         for iPlotPt = 1:numPtsElem
@@ -217,9 +248,9 @@ function getSol(mesh::Mesh, sol0, numPts=mesh.numElem)
     is=1; ie=numPtsElem
     for iElem in 1:mesh.numElem
         curNodes = mesh.elemNode[iElem]
-        splineVal = B*(mesh.C[iElem])'
+        splineVal = B*(mesh.C[iElem])
         wgts = mesh.weights[curNodes]
-        basisVal = zero(splineVal)
+        basisVal = zeros(size(splineVal))
         for iPlotPt = 1:numPtsElem
             RR = splineVal[iPlotPt,:].* wgts
             w_sum = sum(RR)
@@ -242,9 +273,9 @@ function getBasis(mesh::Mesh)
         for iElem = 1:mesh.numElem
             localIndex = findall(isequal(iBasis), mesh.elemNode[iElem])
             if length(localIndex)>0
-                plotVal = B*(mesh.C[iElem][localIndex,:])'
+                plotVal = B*(mesh.C[iElem][localIndex,:])
                 R[(iElem-1)*(numPtsElem-1)+1:iElem*(numPtsElem-1)+1, iBasis] .= plotVal
-                plotVal = dB*(mesh.C[iElem][localIndex,:])'
+                plotVal = dB*(mesh.C[iElem][localIndex,:])
                 dR[(iElem-1)*(numPtsElem-1)+1:iElem*(numPtsElem-1)+1, iBasis] .= plotVal
             end
         end

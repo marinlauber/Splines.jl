@@ -1,7 +1,7 @@
 using LinearAlgebra
 function bernsteinBasis(u::AbstractVector{T}, deg) where T
     """
-    Function returns the values of  Bernstein basis of degree deg at points u
+    Function returns the values of Bernstein basis of degree deg at points u
     Algorithm A1.3 in Piegl & Tiller
     xi is a 1D array
     """
@@ -57,7 +57,7 @@ function bernsteinBasis(u::AbstractVector{T}, deg) where T
     else
         ddB = zeros(T, lenU,deg+1)
     end
-    return B, dB, ddB
+    return SArray{Tuple{lenU,deg+1}}(B), SArray{Tuple{lenU,deg+1}}(dB), SArray{Tuple{lenU,deg+1}}(ddB)
 end
 
 function bezierExtraction(knot::AbstractVector{T}, deg) where T

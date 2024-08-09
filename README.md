@@ -43,6 +43,8 @@ The following results are obtained for a cantilever beam with a point load at th
 
 ![](./images/beam_vibration.gif)
 
+There are currenlty two Dynamic solvers implemented in the package, the Generalized-α method and the Newmark method. The Generalized-α method is the default method used in the package. The ρ∞ parameter is used to control the numerical damping of the system. The Newmark method is unconditionally stable for `ρ∞=1.0`, which results in `γ=0.5` and `β=0.25`.
+
 #### Current usage
 
 Development stage means that to use this package it is best to `dev` it
