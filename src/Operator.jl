@@ -33,6 +33,8 @@ struct StaticFEOperator{T,Vf<:AbstractArray{T},Mf<:AbstractArray{T}} <: Abstract
     Neumann_BC   :: Vector{Boundary1D}
     EI :: Function
     EA :: Function
+    EI :: Function
+    EA :: Function
     ρ :: Union{Function,Nothing} # density as a function of curvilnear coordinate
     g :: Union{Function,Nothing} # gravitational acceleration
     function StaticFEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC=[], Neumann_BC=[];
@@ -45,8 +47,11 @@ struct StaticFEOperator{T,Vf<:AbstractArray{T},Mf<:AbstractArray{T}} <: Abstract
         # no mass if not provided
         global_mass!(M, mesh, ρ, gauss_rule)
         new{T,typeof(x),typeof(K)}(x,r,q,K,J,M,mesh,gauss_rule,Dirichlet_BC,Neumann_BC,F2F(EI),F2F(EA),ρ,g)
+        new{T,typeof(x),typeof(K)}(x,r,q,K,J,M,mesh,gauss_rule,Dirichlet_BC,Neumann_BC,F2F(EI),F2F(EA),ρ,g)
     end
 end
+F2F(a::Function) = a
+F2F(a::Number) = (x)->a
 F2F(a::Function) = a
 F2F(a::Number) = (x)->a
 """
@@ -83,6 +88,8 @@ struct DynamicFEOperator{I,T,Vf<:AbstractArray{T},Mf<:AbstractArray{T}} <: Abstr
     Neumann_BC   :: Vector{Boundary1D}
     EI :: Function
     EA :: Function
+    EI :: Function
+    EA :: Function
     u ::Union{AbstractVector,Tuple{Vararg{AbstractVector}}}
     αm :: T
     αf :: T
@@ -105,6 +112,7 @@ struct DynamicFEOperator{I,T,Vf<:AbstractArray{T},Mf<:AbstractArray{T}} <: Abstr
         K, J, M = zeros(T,Ng) |> f, zeros(T,Ng) |> f, zeros(T,Ng) |> f
         # can be made nicer
         global_mass!(M, mesh, ρ, gauss_rule) #never changes between time steps
+        new{I,T,typeof(x),typeof(K)}(x,r,q,K,J,M,mesh,gauss_rule,Dirichlet_BC,Neumann_BC,F2F(EI),F2F(EA),
         new{I,T,typeof(x),typeof(K)}(x,r,q,K,J,M,mesh,gauss_rule,Dirichlet_BC,Neumann_BC,F2F(EI),F2F(EA),
                                       (zero(r),zero(r),zero(r)),αm,αf,β,γ,[0.0],ρ,g)
     end
