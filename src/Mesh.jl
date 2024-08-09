@@ -211,8 +211,8 @@ function plotSolError(mesh::Mesh, sol0, exactSol::Function)
     end
     display(graph)
 end
-function getDerivSol(mesh::Mesh, sol0)
-    numPtsElem = 4
+function getDerivSol(mesh::Mesh, sol0,numPts=mesh.numElem)
+    numPtsElem = max(floor(Int, numPts/mesh.numElem)+1,2)
     evalPts = LinRange(-1, 1, numPtsElem)
     B, dB, ddB = bernsteinBasis(evalPts, mesh.degP[1])
     sol = zeros((numPtsElem-1)*mesh.numElem+1)

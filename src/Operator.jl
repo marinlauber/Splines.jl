@@ -113,7 +113,7 @@ end
 """
     residual(resid, x, force, op::AbstractFEOperator)
 
-Compute the residuals of a gicen operator `op`, using an initial solution `x` and an 
+Compute the residuals of a given operator `op`, using an initial solution `x` and an 
 external force `force`.
 """
 function residual!(resid, x, force, op::AbstractFEOperator)
@@ -185,17 +185,17 @@ function integrate!(op::AbstractFEOperator, x0::AbstractVector{T}, fx::AbstractA
             phys_pt = RR' * op.mesh.controlPoints[1, In]
 
             # compute linearised terms using the current solution
-            du0dx = dR' * x0[In]
-            dw0dx = dR' * x0[In.+nB]
+            du0dx = Jac_ref_par * Jac_par_phys * dR' * x0[In]
+            dw0dx = Jac_ref_par * Jac_par_phys * dR' * x0[In.+nB]
 
             # external force at the Gauss point and gravity
             fi = external(fx, iElem, iGauss, op); gravity!(op, fi, phys_pt, op.g)
-            op.ext[In     ] += Jac_par_phys * Jac_ref_par * fi[1] * RR * op.gauss_rule.weights[iGauss]
+            op.ext[In    ] += Jac_par_phys * Jac_ref_par * fi[1] * RR * op.gauss_rule.weights[iGauss]
             op.ext[In.+nB] += Jac_par_phys * Jac_ref_par * fi[2] * RR * op.gauss_rule.weights[iGauss]
 
             # compute the different terms
-            op.stiff[I] += Jac_ref_par * Jac_par_phys * op.EA(phys_pt) * (dR*dR') * op.gauss_rule.weights[iGauss]
-            op.stiff[I.+δ(0,nB)] += 0.5 * Jac_ref_par * Jac_par_phys * op.EA(phys_pt) * (dw0dx) * (dR*dR') * op.gauss_rule.weights[iGauss]
+            op.stiff[I          ] += Jac_ref_par * Jac_par_phys * op.EA(phys_pt) * (dR*dR') * op.gauss_rule.weights[iGauss]
+            op.stiff[I.+δ( 0,nB)] += 0.5 * Jac_ref_par * Jac_par_phys * op.EA(phys_pt) * (dw0dx) * (dR*dR') * op.gauss_rule.weights[iGauss]
             op.stiff[I.+δ(nB,nB)] += Jac_ref_par * Jac_par_phys^2 * op.EI(phys_pt) * (ddR*ddR') * op.gauss_rule.weights[iGauss]
             op.stiff[I.+δ(nB,nB)] += 0.5 * Jac_ref_par * Jac_par_phys * op.EA(phys_pt) * (du0dx + dw0dx^2) * (dR*dR') * op.gauss_rule.weights[iGauss]
             
@@ -215,7 +215,7 @@ end
 Get the external force at the Gauss point `iGauss` of the element `iElem`.
 """
 function external(fx, iElem, iGauss, op::AbstractFEOperator)
-    fx[:,(iElem-1)*length(op.gauss_rule.nodes)+iGauss]
+    return fx[:,(iElem-1)*length(op.gauss_rule.nodes)+iGauss]
 end
 """
     gravity!
@@ -274,9 +274,11 @@ function applyBC!(op::AbstractFEOperator)
             end
         end
     end
-    # propagate the Neumann BC to the jacobian
-    op.jacob[2numBasis+1:end,:] .= op.stiff[2numBasis+1:end,:]
-    op.jacob[:,2numBasis+1:end] .= op.stiff[:,2numBasis+1:end]
+    if length(op.Neumann_BC) > 0
+        # propagate the Neumann BC to the jacobian
+        op.jacob[2numBasis+1:end,:] .= op.stiff[2numBasis+1:end,:]
+        op.jacob[:,2numBasis+1:end] .= op.stiff[:,2numBasis+1:end]
+    end
     
     # apply Dirichlet BC
     for i=eachindex(op.Dirichlet_BC)

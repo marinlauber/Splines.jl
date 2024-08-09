@@ -1,6 +1,3 @@
-using NLsolve
-using ImplicitAD
-using LineSearches
 using StaticArrays
 
 """
@@ -16,7 +13,7 @@ function lsolve!(op::AbstractFEOperator, force)
     integrate!(op, zero(op.resid), force)
 
     # compute the residuals
-    op.resid .= - op.ext
+    op.resid .= -op.ext
 
     # apply BC
     applyBC!(op)
@@ -31,33 +28,27 @@ end
 Solves the nonlinear system of equations for the operator `op` and returns the
 displacement increment.
 """
-function nlsolve!(op::AbstractFEOperator, x, force)
-    
-    # unpack pre-allocated storage and the convergence flag
-    @unpack resid, jacob = op
+LinearAlgebra.norm(op::AbstractFEOperator) = norm(op.resid[1:2op.mesh.numBasis])
+function nlsolve!(op::AbstractFEOperator, x, force; tol=1.0e-6, max_iter=1000)
+    # Newton-Raphson iterations loop
+    r₂ = 1.0; iter = 1;
+    while r₂ > tol && iter < max_iter
+        # update the jacobian, the residual and the external force
+        integrate!(op, x, force)
 
-    # warp the residual and the jacobian
-    f!(resid, x) = residual!(resid, x, force, op)
-    j!(jacob, x) = jacobian!(jacob, x, force, op)
+        # compute residuals
+        op.resid .=  op.stiff*x - op.ext
 
-    # prepare for solve
-    df = NLsolve.OnceDifferentiable(f!, j!, x, resid, jacob)
+        # apply BC
+        applyBC!(op)
 
-    # # solve the system
-    result = NLsolve.nlsolve(df, x,
-                             show_trace=false,
-                             linsolve=(x, A, b) -> x .= ImplicitAD.implicit_linear(A, b), # what is that doing?
-                             method=:newton,
-                             linesearch=LineSearches.BackTracking(maxstep=1e6),
-                             ftol=1e-9,
-                             iterations=1000)
-
-    # update the state, residual, jacobian, and convergence flag
-    x .= result.zero
-    op.resid .= df.F
-    op.jacob .= df.DF
-
-    return x
+        # check convergence
+        r₂ = norm(op)
+        if r₂ < tol && break; end
+        
+        # newton solve for the displacement increment
+        x .-= op.jacob\op.resid; iter += 1
+    end
 end
 
 """
@@ -66,7 +57,7 @@ end
 Integrate a (potentially nonlinear) operator forward in time, given an external
 force and a time step size.
 """
-function solve_step!(op::DynamicFEOperator{GeneralizedAlpha}, force, Δt; tol=1.0e-6, max_iter=1000)
+function solve_step!(op::DynamicFEOperator{GeneralizedAlpha}, force, Δt; tol=1.0e-4, max_iter=1e3)
               
     # useful
     αf, αm, β, γ = op.αf, op.αm, op.β, op.γ
@@ -77,7 +68,7 @@ function solve_step!(op::DynamicFEOperator{GeneralizedAlpha}, force, Δt; tol=1.
 
     # Newton-Raphson iterations loop
     r₂ = 1.0; iter = 1;
-    while r₂ > tol && iter < max_iter
+    while iter < max_iter
 
         # compute v_{n+1}, a_{n+1}, ... from "Isogeometric analysis: toward integration of CAD and FEA"
         vⁿ⁺¹ = γ/(β*Δt)*dⁿ⁺¹ - γ/(β*Δt)*dⁿ + (1.0-γ/β)*vⁿ - Δt*(γ/2β-1.0)*aⁿ;
@@ -90,6 +81,7 @@ function solve_step!(op::DynamicFEOperator{GeneralizedAlpha}, force, Δt; tol=1.
 
         # update the jacobian, the residual and the external force
         integrate!(op, dⁿ⁺ᵅ, force)
+        # integrate_inextensible!(op, dⁿ⁺ᵅ, force)
 
         # compute the jacobian and the residuals
         op.jacob .= αm/(β*Δt^2)*op.mass .+ αf*op.jacob
@@ -99,19 +91,20 @@ function solve_step!(op::DynamicFEOperator{GeneralizedAlpha}, force, Δt; tol=1.
         applyBC!(op)
 
         # check convergence
-        r₂ = norm(op.resid);
+        r₂ = norm(op)
         if r₂ < tol && break; end
 
         # newton solve for the displacement increment
         dⁿ⁺¹ -= op.jacob\op.resid; iter += 1
     end
+
     # save variables
     op.u[1] .= dⁿ⁺¹
     op.u[2] .= vⁿ⁺¹
     op.u[3] .= aⁿ⁺¹
 end
 
-function solve_step!(op::DynamicFEOperator{Newmark}, force, Δt; tol=1.0e-6, max_iter=1000)
+function solve_step!(op::DynamicFEOperator{Newmark}, force, Δt; tol=1.0e-4, max_iter=1e3)
               
     # useful
     β, γ = op.β, op.γ
@@ -126,7 +119,7 @@ function solve_step!(op::DynamicFEOperator{Newmark}, force, Δt; tol=1.0e-6, max
 
     # Newton-Raphson iterations loop
     r₂ = 1.0; iter = 1;
-    while r₂ > tol && iter < max_iter
+    while iter < max_iter
 
         # update the jacobian, the residual and the external force
         integrate!(op, dⁿ⁺¹, force)
@@ -139,7 +132,7 @@ function solve_step!(op::DynamicFEOperator{Newmark}, force, Δt; tol=1.0e-6, max
         applyBC!(op)
 
         # check convergence
-        r₂ = norm(op.resid);
+        r₂ = norm(op)
         if r₂ < tol && break; end
 
         # newton solve for the displacement increment
@@ -148,6 +141,7 @@ function solve_step!(op::DynamicFEOperator{Newmark}, force, Δt; tol=1.0e-6, max
         vⁿ⁺¹ += γ/(β*Δt)*Δd
         aⁿ⁺¹ += 1.0/(β*Δt^2)*Δd
     end
+    
     # save variables
     op.u[1] .= dⁿ⁺¹
     op.u[2] .= vⁿ⁺¹
