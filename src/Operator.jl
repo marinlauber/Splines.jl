@@ -194,13 +194,11 @@ function integrate!(op::AbstractFEOperator, x0::AbstractVector{T}, fx::AbstractA
             op.ext[In.+nB] += Jac_par_phys * Jac_ref_par * fi[2] * RR * op.gauss_rule.weights[iGauss]
 
             # compute the different terms
-            op.stiff[I          ] += Jac_ref_par * Jac_par_phys * op.EA(phys_pt) * (dR*dR') * op.gauss_rule.weights[iGauss]
-            op.stiff[I.+δ( 0,nB)] += 0.5 * Jac_ref_par * Jac_par_phys * op.EA(phys_pt) * (dw0dx) * (dR*dR') * op.gauss_rule.weights[iGauss]
+            op.stiff[I          ] += Jac_ref_par * Jac_par_phys^2 * op.EI(phys_pt) * (ddR*ddR') * op.gauss_rule.weights[iGauss]
             op.stiff[I.+δ(nB,nB)] += Jac_ref_par * Jac_par_phys^2 * op.EI(phys_pt) * (ddR*ddR') * op.gauss_rule.weights[iGauss]
-            op.stiff[I.+δ(nB,nB)] += 0.5 * Jac_ref_par * Jac_par_phys * op.EA(phys_pt) * (du0dx + dw0dx^2) * (dR*dR') * op.gauss_rule.weights[iGauss]
             
             # only different entry of Jacobian
-            op.jacob[I.+δ(nB,nB)] += Jac_ref_par * Jac_par_phys * op.EA(phys_pt) * (dw0dx^2) * (dR*dR') * op.gauss_rule.weights[iGauss]
+            # op.jacob[I.+δ(nB,nB)] += Jac_ref_par * Jac_par_phys * op.EA(phys_pt) * (dw0dx^2) * (dR*dR') * op.gauss_rule.weights[iGauss]
         end
     end
     # enforce symmetry K21 -> K12
