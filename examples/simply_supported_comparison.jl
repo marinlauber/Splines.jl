@@ -1,7 +1,6 @@
 using Splines
 using Plots
 
-
 function test_pinned_pinned_UDL(numElem=2, degP=3)
     println("Testing on pinned-pinned beam with UDL:")
     println(" numElem: ", numElem)
@@ -25,7 +24,7 @@ function test_pinned_pinned_UDL(numElem=2, degP=3)
     Neumann_BC = []
 
     # make a problem
-    operator = FEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC, Neumann_BC)
+    operator = StaticFEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC, Neumann_BC)
 
     # uniform external loading at integration points
     force = zeros(2, 4operator.mesh.numBasis); force[2,:] .= 1.0
@@ -65,7 +64,7 @@ function test_fixed_fixed_UDL(numElem=2, degP=3)
     ]
 
     # make a problem
-    operator = FEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC, Neumann_BC)
+    operator = StaticFEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC, Neumann_BC)
 
     # uniform external loading at integration points
     force = zeros(2, 4operator.mesh.numBasis); force[2,:] .= 1.0
@@ -118,7 +117,7 @@ end
 #     ]
 
 #     # make a problem
-#     operator = FEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC, Neumann_BC)
+#     operator = StaticFEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC, Neumann_BC)
 
 #     # uniform external loading at integration points
 #     int_pnts = uv_integration(operator)
@@ -166,7 +165,7 @@ end
 #     ]
 
 #     # make a problem
-#     operator = FEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC, Neumann_BC)
+#     operator = StaticFEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC, Neumann_BC)
 
 #     # uniform external loading at integration points
 #     int_pnts = uv_integration(operator)
@@ -215,7 +214,7 @@ Neumann_BC = [
 ]
 
 # make a problem
-operator = FEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC, Neumann_BC)
+operator = StaticFEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC, Neumann_BC)
 
 # uniform external loading at integration points
 int_pnts = uv_integration(operator)
@@ -250,7 +249,7 @@ Neumann_BC = [
 ]
 
 # make a problem
-operator = FEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC, Neumann_BC)
+operator = StaticFEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC, Neumann_BC)
 
 # uniform external loading at integration points
 int_pnts = uv_integration(operator)
@@ -293,7 +292,7 @@ Dirichlet_BC = [
 Neumann_BC = []
 
 # make a problem
-operator = FEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC, Neumann_BC)
+operator = StaticFEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC, Neumann_BC)
 
 # uniform external loading at integration points
 force = zeros(2, 2operator.mesh.numBasis); force[2,:] .= 1.0
@@ -330,7 +329,7 @@ Dirichlet_BC = [
 Neumann_BC = []
 
 # make a problem
-operator = FEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC, Neumann_BC)
+operator = StaticFEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC, Neumann_BC)
 
 # uniform external loading at integration points
 force = zeros(2, 2operator.mesh.numBasis); force[2,:] .= 1.0
