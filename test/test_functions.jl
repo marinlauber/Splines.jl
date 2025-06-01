@@ -306,7 +306,7 @@ function test_nonlinear(numElem=20, degP=2)
     f = zeros(2,length(uv_integration(operator)))
 
     # time loops
-    @time @gif for k = 0:Nₜ
+    @time for k = 0:Nₜ
         
         # warp the residual and the jacobian
         function f!(resid, x) 
@@ -335,8 +335,6 @@ function test_nonlinear(numElem=20, degP=2)
         w0 = result[mesh.numBasis+1:2mesh.numBasis]
         u = xs .+ getSol(operator.mesh, u0, 21)
         w = getSol(operator.mesh, w0, 21)
-        Plots.plot(u, w, legend=:none, xlim=(-0.5*ptRight,ptRight*1.5), aspect_ratio=:equal, ylims=(0.5-2ptRight,0.5), 
-                    title="tU/L = $k")
         println("beam length ", round(sum(sqrt.(diff(u).^2 + diff(w).^2)), digits=4))
     end
 
@@ -387,7 +385,7 @@ function test_dynamic(numElem=2, degP=3)
     f_ext = zeros(2,length(uv_integration(operator)))
 
     # time loops
-    @time @gif for k = 2:Nₜ
+    @time for k = 2:Nₜ
         # external loading
         f_ext .= 0.0
         f_ext[2,:] .= 2P*sin(2π*fhz[1]*time[k]/L)
@@ -401,8 +399,6 @@ function test_dynamic(numElem=2, degP=3)
         u = xs .+ getSol(operator.mesh, u0, 1)
         w = getSol(operator.mesh, w0, 1)
         ti =round(time[k],digits=3)
-        Plots.plot(u, w, legend=:none, xlim=(-0.5*ptRight,ptRight*1.5), aspect_ratio=:equal, ylims=(-ptRight,ptRight), 
-                title="tU/L = $(ti/L)")
         println("beam length ", round(sum(sqrt.(diff(u).^2 + diff(w).^2)), digits=4))
     end
 end

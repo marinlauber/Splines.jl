@@ -1,9 +1,6 @@
 module Splines
 
 using UnPack
-using Plots
-
-export Plots
 export @unpack
 
 using KernelAbstractions: get_backend, @index, @kernel
