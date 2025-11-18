@@ -37,7 +37,7 @@ struct StaticFEOperator{T,Vf<:AbstractArray{T},Mf<:AbstractArray{T}} <: Abstract
     g :: Union{Function,Nothing} # gravitational acceleration
     function StaticFEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC=[], Neumann_BC=[];
                               ρ=nothing, g=nothing,
-                              f=Array, T=Float64)
+                              f=Array, T=Float32)
         # generate
         Nd = 2*mesh.numBasis+length(Neumann_BC); Ng = (Nd,Nd)
         x, r, q = zeros(T,Nd) |> f, zeros(T,Nd) |> f, zeros(T,Nd) |> f
@@ -50,7 +50,7 @@ end
 F2F(a::Function) = a
 F2F(a::Number) = (x)->a
 """
-    DynamicFEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC=[], Neumann_BC=[]; 
+    DynamicFEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC=[], Neumann_BC=[];
                       ρ::Function=(x)->-1.0, f=Array, ρ∞=1.0, T=Float64, I=GeneralizedAlpha)
 
 Defines a finite element operator for a beam element, with the following fields:
@@ -91,14 +91,14 @@ struct DynamicFEOperator{I,T,Vf<:AbstractArray{T},Mf<:AbstractArray{T}} <: Abstr
     Δt :: Vector{T}
     ρ :: Union{Function,Nothing} # density as a function of curvilnear coordinate
     g :: Union{Function,Nothing} # gravitational acceleration
-    function DynamicFEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC=[], Neumann_BC=[]; 
-                               ρ::Function=(x)->-1.0,  ρ∞=1.0, g=nothing, 
-                               f=Array, T=Float64, I=GeneralizedAlpha)
+    function DynamicFEOperator(mesh, gauss_rule, EI, EA, Dirichlet_BC=[], Neumann_BC=[];
+                               ρ::Function=(x)->-1.0,  ρ∞=1.0, g=nothing,
+                               f=Array, T=Float32, I=GeneralizedAlpha)
         # time integration parameters
-        αm = (2.0 - ρ∞)/(ρ∞ + 1.0);
-        αf = 1.0/(1.0 + ρ∞)
-        γ = 0.5 - αf + αm;
-        β = 0.25*(1.0 - αf + αm)^2;
+        αm = (2 - ρ∞)/(ρ∞ + 1);
+        αf = 1/(1 + ρ∞)
+        γ = 1/2 - αf + αm;
+        β = 1/4*(1 - αf + αm)^2;
         # generate
         Nd = 2*mesh.numBasis+length(Neumann_BC); Ng = (Nd,Nd)
         x, r, q = zeros(T,Nd) |> f, zeros(T,Nd) |> f, zeros(T,Nd) |> f
@@ -106,14 +106,14 @@ struct DynamicFEOperator{I,T,Vf<:AbstractArray{T},Mf<:AbstractArray{T}} <: Abstr
         # can be made nicer
         global_mass!(M, mesh, ρ, gauss_rule) #never changes between time steps
         new{I,T,typeof(x),typeof(K)}(x,r,q,K,J,M,mesh,gauss_rule,Dirichlet_BC,Neumann_BC,F2F(EI),F2F(EA),
-                                      (zero(r),zero(r),zero(r)),αm,αf,β,γ,[0.0],ρ,g)
+                                      (zero(r),zero(r),zero(r)),T(αm),T(αf),T(β),T(γ),[zero(T)],ρ,g)
     end
 end
 
 """
     residual(resid, x, force, op::AbstractFEOperator)
 
-Compute the residuals of a given operator `op`, using an initial solution `x` and an 
+Compute the residuals of a given operator `op`, using an initial solution `x` and an
 external force `force`.
 """
 function residual!(resid, x, force, op::AbstractFEOperator)
@@ -132,7 +132,7 @@ end
 """
     jacobian!(jacob, x, force, op::AbstractFEOperator)
 
-Compute the Jacobian of a  given operator `op`, using an initial solution `x` and an 
+Compute the Jacobian of a  given operator `op`, using an initial solution `x` and an
 external force `force`.
 """
 function jacobian!(jacob, x, force, op::AbstractFEOperator)
@@ -150,19 +150,19 @@ end
 """
     integrate!(op::AbstractFEOperator, x0::Vector{T}, fx)
 
-Integrate the operator `op` given an initial solution `x0` and an external force. 
+Integrate the operator `op` given an initial solution `x0` and an external force.
 This performs the element-wise integration of the different term in the governing equations.
 """
 function integrate!(op::AbstractFEOperator, x0::AbstractVector{T}, fx::AbstractArray{T}) where T
     # reset
-    op.stiff .= 0.; op.jacob .= 0.; op.ext .= 0.;
+    op.stiff .= 0; op.jacob .= 0; op.ext .= 0;
     nB,degP = op.mesh.numBasis,op.mesh.degP[1]
     # integrate on each element
     for iElem = 1:op.mesh.numElem
-        
+
         # compute the (B-)spline basis functions and derivatives with Bezier extraction
         Jac_ref_par,N,dN,ddN = BSplineBasis(op.mesh, iElem)
-        
+
         # where are we in the stiffness matrix
         I = element(iElem,degP)
         In = nodes(iElem,degP)
@@ -198,7 +198,7 @@ function integrate!(op::AbstractFEOperator, x0::AbstractVector{T}, fx::AbstractA
             op.stiff[I.+δ( 0,nB)] += 0.5 * Jac_ref_par * Jac_par_phys * op.EA(phys_pt) * (dw0dx) * (dR*dR') * op.gauss_rule.weights[iGauss]
             op.stiff[I.+δ(nB,nB)] += Jac_ref_par * Jac_par_phys^2 * op.EI(phys_pt) * (ddR*ddR') * op.gauss_rule.weights[iGauss]
             op.stiff[I.+δ(nB,nB)] += 0.5 * Jac_ref_par * Jac_par_phys * op.EA(phys_pt) * (du0dx + dw0dx^2) * (dR*dR') * op.gauss_rule.weights[iGauss]
-            
+
             # only different entry of Jacobian
             op.jacob[I.+δ(nB,nB)] += Jac_ref_par * Jac_par_phys * op.EA(phys_pt) * (dw0dx^2) * (dR*dR') * op.gauss_rule.weights[iGauss]
         end
@@ -279,7 +279,7 @@ function applyBC!(op::AbstractFEOperator)
         op.jacob[2numBasis+1:end,:] .= op.stiff[2numBasis+1:end,:]
         op.jacob[:,2numBasis+1:end] .= op.stiff[:,2numBasis+1:end]
     end
-    
+
     # apply Dirichlet BC
     for i=eachindex(op.Dirichlet_BC)
         bcdof = findall(op.mesh.controlPoints[1,:].==op.Dirichlet_BC[i].x_val)
@@ -291,9 +291,9 @@ function applyBC!(op::AbstractFEOperator)
             op.resid .-= op.stiff[:,bcdof]*bcval
             op.resid[bcdof] .= bcval
             # reset stiffness and mass
-            op.stiff[bcdof,:] .= op.jacob[bcdof,:] .= 0.0 
-            op.stiff[:,bcdof] .= op.jacob[:,bcdof] .= 0.0
-            op.stiff[bcdof,bcdof] .= op.jacob[bcdof,bcdof] .= 1.0
+            op.stiff[bcdof,:] .= op.jacob[bcdof,:] .= 0
+            op.stiff[:,bcdof] .= op.jacob[:,bcdof] .= 0
+            op.stiff[bcdof,bcdof] .= op.jacob[bcdof,bcdof] .= 1
         end
     end
 end
@@ -309,7 +309,7 @@ function global_mass!(mass::AbstractArray{T}, mesh::Mesh{T}, ρ::Function, gauss
     for iElem = 1:mesh.numElem
         # compute the (B-)spline basis functions and derivatives with Bezier extraction
         Jac_ref_par,N,dN,ddN = BSplineBasis(mesh, iElem)
-        
+
         # where are we in the stiffness matrix
         I = element(iElem,degP)
         In = nodes(iElem,degP)

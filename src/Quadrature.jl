@@ -10,8 +10,10 @@ end
 """
 Generates the Gauss-Legendre points of order n
 """
-function genGaussLegendre(n)
+function genGaussLegendre(n;T=Float64)
     nodes, weights = gausslegendre(n)
+    nodes = convert.(T, nodes)
+    weights = convert.(T, weights)
     gauss_rule = GaussQuad(nodes, weights)
     return gauss_rule
 end

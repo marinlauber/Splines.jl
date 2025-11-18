@@ -45,7 +45,7 @@ function nlsolve!(op::AbstractFEOperator, x, force; tol=1.0e-6, max_iter=1000)
         # check convergence
         r₂ = norm(op)
         if r₂ < tol && break; end
-        
+
         # newton solve for the displacement increment
         x .-= op.jacob\op.resid; iter += 1
     end
@@ -57,8 +57,8 @@ end
 Integrate a (potentially nonlinear) operator forward in time, given an external
 force and a time step size.
 """
-function solve_step!(op::DynamicFEOperator{GeneralizedAlpha}, force, Δt; tol=1.0e-4, max_iter=1e3)
-              
+function solve_step!(op::DynamicFEOperator{GeneralizedAlpha}, force, Δt; tol=1e-4, max_iter=1e3)
+
     # useful
     αf, αm, β, γ = op.αf, op.αm, op.β, op.γ
 
@@ -67,17 +67,18 @@ function solve_step!(op::DynamicFEOperator{GeneralizedAlpha}, force, Δt; tol=1.
     dⁿ=copy(dⁿ⁺¹); vⁿ=copy(vⁿ⁺¹); aⁿ=copy(aⁿ⁺¹);
 
     # Newton-Raphson iterations loop
-    r₂ = 1.0; iter = 1;
+    r₂ = 1.f0; iter = 1;
+
     while iter < max_iter
 
         # compute v_{n+1}, a_{n+1}, ... from "Isogeometric analysis: toward integration of CAD and FEA"
-        vⁿ⁺¹ = γ/(β*Δt)*dⁿ⁺¹ - γ/(β*Δt)*dⁿ + (1.0-γ/β)*vⁿ - Δt*(γ/2β-1.0)*aⁿ;
-        aⁿ⁺¹ = 1.0/(β*Δt^2)*dⁿ⁺¹ - 1.0/(β*Δt^2)*dⁿ - 1.0/(β*Δt)*vⁿ - (1.0/2β-1.0)*aⁿ;
+        vⁿ⁺¹ = γ/(β*Δt)*dⁿ⁺¹ - γ/(β*Δt)*dⁿ + (1-γ/β)*vⁿ - Δt*(γ/2β-1)*aⁿ;
+        aⁿ⁺¹ = 1/(β*Δt^2)*dⁿ⁺¹ - 1/(β*Δt^2)*dⁿ - 1/(β*Δt)*vⁿ - (1/2β-1)*aⁿ;
 
         # compute d_{n+af}, v_{n+af}, a_{n+am}, ...
-        dⁿ⁺ᵅ = αf*dⁿ⁺¹ + (1.0-αf)*dⁿ;
-        vⁿ⁺ᵅ = αf*vⁿ⁺¹ + (1.0-αf)*vⁿ;
-        aⁿ⁺ᵅ = αm*aⁿ⁺¹ + (1.0-αm)*aⁿ;
+        dⁿ⁺ᵅ = αf*dⁿ⁺¹ + (1-αf)*dⁿ;
+        vⁿ⁺ᵅ = αf*vⁿ⁺¹ + (1-αf)*vⁿ;
+        aⁿ⁺ᵅ = αm*aⁿ⁺¹ + (1-αm)*aⁿ;
 
         # update the jacobian, the residual and the external force
         integrate!(op, dⁿ⁺ᵅ, force)
@@ -104,8 +105,8 @@ function solve_step!(op::DynamicFEOperator{GeneralizedAlpha}, force, Δt; tol=1.
     op.u[3] .= aⁿ⁺¹
 end
 
-function solve_step!(op::DynamicFEOperator{Newmark}, force, Δt; tol=1.0e-4, max_iter=1e3)
-              
+function solve_step!(op::DynamicFEOperator{Newmark}, force, Δt; tol=1e-4, max_iter=1e3)
+
     # useful
     β, γ = op.β, op.γ
 
@@ -141,7 +142,7 @@ function solve_step!(op::DynamicFEOperator{Newmark}, force, Δt; tol=1.0e-4, max
         vⁿ⁺¹ += γ/(β*Δt)*Δd
         aⁿ⁺¹ += 1.0/(β*Δt^2)*Δd
     end
-    
+
     # save variables
     op.u[1] .= dⁿ⁺¹
     op.u[2] .= vⁿ⁺¹

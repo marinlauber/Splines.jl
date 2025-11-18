@@ -18,15 +18,15 @@ mutable struct Mesh{T}
     knots         :: AbstractArray{T,1}
     function Mesh(elemVertex::AbstractArray{T,2}, elemNode, degP, C, B, dB, ddB, N, dN, ddN, Jac, numBasis, numElem,
                   controlPoints::AbstractArray{T,2}, weights::AbstractArray{T,1}, knots::AbstractArray{T,1}) where T
-        new{T}(elemVertex, elemNode, degP, C, B, dB, ddB, N, dN, ddN, Jac, 
+        new{T}(elemVertex, elemNode, degP, C, B, dB, ddB, N, dN, ddN, Jac,
                numBasis, numElem, controlPoints, weights, knots)
     end
 end
 
-function Mesh1D(ptLeft, ptRight, numElem, degP)
-    gauss_rule = genGaussLegendre(degP+1)
+function Mesh1D(ptLeft::T, ptRight::T, numElem, degP) where T
+    gauss_rule = genGaussLegendre(degP+1;T)
     nrb = nrbline(ptLeft, ptRight)
-    new_knots = collect(LinRange(0, 1, numElem+1)[2:end-1])
+    new_knots = collect(LinRange(zero(T), one(T), numElem+1)[2:end-1])
     nrb = nrbdegelev(nrb, [degP-1])
     nrb = nrbkntins(nrb, [new_knots])
     IGAmesh = genMesh(nrb, gauss_rule)
@@ -87,13 +87,13 @@ function genMesh(nurbs::NURBS{T}, gauss_rule) where T
     N = Array{AbstractArray{T},1}(undef,numElem)
     dN = Array{AbstractArray{T},1}(undef,numElem)
     ddN = Array{AbstractArray{T},1}(undef,numElem)
-    Jac = zeros(numElem)
+    Jac = zeros(T,numElem)
     for iElem = 1:numElem
         Jac[iElem] = (elemVertex[iElem,2]-elemVertex[iElem,1])/T(2.0)
         N[iElem], dN[iElem], ddN[iElem] = B*C[iElem], dB*C[iElem]/Jac[iElem], ddB*C[iElem]/Jac[iElem]^2
     end
-    elemVertex = SArray{Tuple{numElem,2}}(elemVertex)
-    
+    elemVertex = SArray{Tuple{numElem,2},T}(elemVertex)
+
     IGAmesh = Mesh(elemVertex, IEN, degP, C, B, dB, ddB, N, dN, ddN, Jac, numBasis, numElem, cpts, wgts, knotU)
     return IGAmesh
 end

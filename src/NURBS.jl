@@ -50,16 +50,16 @@ function findspan(n, u, knot::Array)
     return s
 end
 
-function nrbline(points...)
+function nrbline(points::Vararg{T}) where T
     numPts = length(points)
     if numPts==1
         error("More than one point should be specfified")
     end
-    coefs = [zeros(3,numPts); ones(1,numPts)]
+    coefs = [zeros(T,3,numPts); ones(T,1,numPts)]
     for iPt = 1:numPts
         coefs[1:length(points[iPt]),iPt] .= points[iPt]
     end
-    knots = vcat(0, LinRange(0,1,numPts), 1)
+    knots = vcat(0, LinRange(zero(T),one(T),numPts), 1)
     line = nrbmak(coefs, [knots])
     return line
 end
@@ -117,7 +117,7 @@ function bspkntins(d, c, k, u)
     return ic, ik
 end
 
-function nrbkntins(nurbs::NURBS, iknots::AbstractArray)
+function nrbkntins(nurbs::NURBS{T}, iknots::AbstractArray) where T
     degree = nurbs.order .- 1
     fmax(x,y) = any(y.>maximum(x))
     fmin(x,y) = any(y.<minimum(x))
@@ -132,7 +132,8 @@ function nrbkntins(nurbs::NURBS, iknots::AbstractArray)
         coefs = nurbs.coefs
         knots = nurbs.knots
     else
-        coefs, knots[1] = bspkntins(degree[1], nurbs.coefs, nurbs.knots[1], iknots[1])
+        c,k= bspkntins(degree[1], nurbs.coefs, nurbs.knots[1], iknots[1])
+        coefs, knots[1] = convert.(T,c), convert.(T,k)
     end
 
     #construct the new NURBS
@@ -328,7 +329,7 @@ function bspdegelev(d, c, k, t)
     return ic, ik
 end
 
-function nrbdegelev(nurbs::NURBS, ntimes::Array)
+function nrbdegelev(nurbs::NURBS{T}, ntimes::Array) where T
     degree = nurbs.order .- 1
     knots = Array{Array}(undef, length(nurbs.knots))
     # NURBS represents a curve
@@ -336,7 +337,9 @@ function nrbdegelev(nurbs::NURBS, ntimes::Array)
         coefs = nurbs.coefs
         knots = nurbs.knots
     else
-        coefs, knots[1] = bspdegelev(degree[1], nurbs.coefs, nurbs.knots[1], ntimes[1])
+        c, k = bspdegelev(degree[1], nurbs.coefs, nurbs.knots[1], ntimes[1])
+        coefs = convert.(T,c)
+        knots[1] = convert.(T,k)
     end
     #construct new NURBS
     inurbs = nrbmak(coefs, knots)
