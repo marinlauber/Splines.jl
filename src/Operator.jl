@@ -227,19 +227,37 @@ gravity!(op::AbstractFEOperator,f_ext,ξ,::Function) = for i ∈ 1:2
     f_ext[i] += op.g(i,ξ)*op.ρ(ξ)
 end
 """
-    applyBC(op::AbstractFEOperator)
+    applyBC!(op::AbstractFEOperator, d=zero(op.resid))
 
 Apply the boundary conditions to the operator `op`. This modifies the stiffness matrix,
 the residual and the Jacobian. The Neumann boundary conditions are applied using the
 Lagrange multiplier method, while the Dirichlet boundary conditions are applied using
 the penalty method.
+
+`d` is the current iterate, multipliers included, and is what lets the Neumann conditions
+enter the *residual* as well as the matrix. They are imposed with a Lagrange multiplier per
+condition, so the system is the saddle point
+
+    | K  Cᵀ | | d |   | f |              R = | K d + C ᵀλ − f |
+    | C  0  | | λ | = | g |   with residual  |     C d  − g   |
+
+Assembling `C`/`Cᵀ` into the matrix but leaving `Cᵀλ` out of the residual, and writing the
+target `g` into the multiplier row instead of `C d − g`, makes the residual inconsistent with
+the Jacobian: the Newton direction cannot reach the part of the residual that the multiplier
+is supposed to cancel, so it stalls on a floor and every further step adds an increment that
+is invisible to the residual and only inflates `λ`.
+
+The default `d=0` reproduces the old behaviour for the linear/static paths, which form their
+residual from the full `op.stiff` after this call; the Newton solvers pass their iterate.
 """
-function applyBC!(op::AbstractFEOperator)
+applyBC!(op::AbstractFEOperator) = applyBC!(op, zero(op.resid))
+function applyBC!(op::AbstractFEOperator, d::AbstractVector)
     numBasis = op.mesh.numBasis
     # apply Neumann BC
     for i=eachindex(op.Neumann_BC)
         off = (op.Neumann_BC[i].comp-1)*op.mesh.numBasis
         cdof_neu = findall(op.mesh.controlPoints[1,:].==op.Neumann_BC[i].x_val)
+        op.resid[2numBasis+i] = -op.Neumann_BC[i].op_val # constraint residual, accumulated below
         for iElem=1:op.mesh.numElem
             # index of that element
             In = nodes(iElem,op.mesh.degP[1])
@@ -266,11 +284,14 @@ function applyBC!(op::AbstractFEOperator)
                 Jac_par_phys = det(dxdxi)
 
                 # better indeexing
-                op.stiff[2numBasis+i,In.+off] += Jac_ref_par * Jac_par_phys * dR * op.gauss_rule.weights[1]
-                op.stiff[In.+off,2numBasis+i] += Jac_ref_par * Jac_par_phys * dR * op.gauss_rule.weights[1]
+                c = Jac_ref_par * Jac_par_phys * dR * op.gauss_rule.weights[1]
+                op.stiff[2numBasis+i,In.+off] += c
+                op.stiff[In.+off,2numBasis+i] += c
 
-                # lagrange multiplier entry
-                op.resid[2numBasis+i] = op.Neumann_BC[i].op_val
+                # the same pair in the residual: the multiplier's reaction on the beam rows,
+                # and the constraint it enforces on its own row. See the docstring.
+                op.resid[In.+off] .+= c .* d[2numBasis+i]
+                op.resid[2numBasis+i] += c'*d[In.+off]
             end
         end
     end

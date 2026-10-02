@@ -31,7 +31,7 @@ displacement increment.
 LinearAlgebra.norm(op::AbstractFEOperator) = norm(op.resid[1:2op.mesh.numBasis])
 function nlsolve!(op::AbstractFEOperator, x, force; tol=1.0e-6, max_iter=1000)
     # Newton-Raphson iterations loop
-    r₂ = 1.0; iter = 1;
+    r₂ = 1.0; r_prev = Inf; iter = 1;
     while r₂ > tol && iter < max_iter
         # update the jacobian, the residual and the external force
         integrate!(op, x, force)
@@ -39,12 +39,20 @@ function nlsolve!(op::AbstractFEOperator, x, force; tol=1.0e-6, max_iter=1000)
         # compute residuals
         op.resid .=  op.stiff*x - op.ext
 
-        # apply BC
-        applyBC!(op)
+        # apply BC (the iterate is what puts the Neumann reaction into the residual)
+        applyBC!(op, x)
 
         # check convergence
         r₂ = norm(op)
-        if r₂ < tol && break; end
+        # converged, or the iteration has stopped making progress. The second test is not
+        # a nicety: `op.resid` is formed from `op.stiff`, which `integrate!` zeroes and
+        # rebuilds each pass, so it never carries the Neumann Lagrange coupling that
+        # `applyBC!` puts into `op.jacob`. The residual therefore settles on a floor the
+        # Newton direction cannot reach, and every further step adds an increment that is
+        # invisible to the residual -- it only inflates the multipliers. Without this the
+        # loop runs all `max_iter` steps where two do the work.
+        (r₂ < tol || r₂ > 0.99r_prev) && break
+        r_prev = r₂
 
         # newton solve for the displacement increment
         x .-= op.jacob\op.resid; iter += 1
@@ -67,7 +75,7 @@ function solve_step!(op::DynamicFEOperator{GeneralizedAlpha}, force, Δt; tol=1e
     dⁿ=copy(dⁿ⁺¹); vⁿ=copy(vⁿ⁺¹); aⁿ=copy(aⁿ⁺¹);
 
     # Newton-Raphson iterations loop
-    r₂ = 1.f0; iter = 1;
+    r₂ = 1.f0; r_prev = Inf; iter = 1;
 
     while iter < max_iter
 
@@ -88,12 +96,20 @@ function solve_step!(op::DynamicFEOperator{GeneralizedAlpha}, force, Δt; tol=1e
         op.jacob .= αm/(β*Δt^2)*op.mass .+ αf*op.jacob
         op.resid .= op.stiff*dⁿ⁺ᵅ + op.mass*aⁿ⁺ᵅ - op.ext
 
-        # apply BC
-        applyBC!(op)
+        # apply BC (the iterate is what puts the Neumann reaction into the residual)
+        applyBC!(op, dⁿ⁺ᵅ)
 
         # check convergence
         r₂ = norm(op)
-        if r₂ < tol && break; end
+        # converged, or the iteration has stopped making progress. The second test is not
+        # a nicety: `op.resid` is formed from `op.stiff`, which `integrate!` zeroes and
+        # rebuilds each pass, so it never carries the Neumann Lagrange coupling that
+        # `applyBC!` puts into `op.jacob`. The residual therefore settles on a floor the
+        # Newton direction cannot reach, and every further step adds an increment that is
+        # invisible to the residual -- it only inflates the multipliers. Without this the
+        # loop runs all `max_iter` steps where two do the work.
+        (r₂ < tol || r₂ > 0.99r_prev) && break
+        r_prev = r₂
 
         # newton solve for the displacement increment
         dⁿ⁺¹ -= op.jacob\op.resid; iter += 1
@@ -119,7 +135,7 @@ function solve_step!(op::DynamicFEOperator{Newmark}, force, Δt; tol=1e-4, max_i
     aⁿ⁺¹ .= 0.0;
 
     # Newton-Raphson iterations loop
-    r₂ = 1.0; iter = 1;
+    r₂ = 1.0; r_prev = Inf; iter = 1;
     while iter < max_iter
 
         # update the jacobian, the residual and the external force
@@ -129,12 +145,20 @@ function solve_step!(op::DynamicFEOperator{Newmark}, force, Δt; tol=1e-4, max_i
         op.jacob .= 1.0/(β*Δt^2)*op.mass .+ op.jacob
         op.resid .= op.stiff*dⁿ⁺¹ + op.mass*aⁿ⁺¹ - op.ext
 
-        # apply BC
-        applyBC!(op)
+        # apply BC (the iterate is what puts the Neumann reaction into the residual)
+        applyBC!(op, dⁿ⁺¹)
 
         # check convergence
         r₂ = norm(op)
-        if r₂ < tol && break; end
+        # converged, or the iteration has stopped making progress. The second test is not
+        # a nicety: `op.resid` is formed from `op.stiff`, which `integrate!` zeroes and
+        # rebuilds each pass, so it never carries the Neumann Lagrange coupling that
+        # `applyBC!` puts into `op.jacob`. The residual therefore settles on a floor the
+        # Newton direction cannot reach, and every further step adds an increment that is
+        # invisible to the residual -- it only inflates the multipliers. Without this the
+        # loop runs all `max_iter` steps where two do the work.
+        (r₂ < tol || r₂ > 0.99r_prev) && break
+        r_prev = r₂
 
         # newton solve for the displacement increment
         Δd = -op.jacob\op.resid; iter += 1
